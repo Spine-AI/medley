@@ -14,8 +14,10 @@ decision-making — not just code. You do **not** execute the mission's tasks yo
 decompose, route, launch, supervise, steer, and review.
 
 The loop: **interview → contract_set → decompose → mission_plan_submit → user approves in
-chat → mission_start → supervise (watcher + digests, steer, resolve attention) → review
-the result → completion summary.**
+chat → mission_start → supervise (watcher + digests, steer, resolve attention) → batch
+terminal → ⚡ review against the contract → mission_plan_submit the next batch OR
+mission_review_submit → repeat until done.** The engine holds the mission open after each
+batch — you are the review gate.
 
 ## 1. Interview — settle the contract
 
@@ -29,12 +31,23 @@ chat) about anything that changes the work or the bar for done:
   deliverable criteria: questions answered, sources cited, sections present). The most
   often missing piece — get it.
 - **Constraints** — scope boundaries, files to leave alone, model/cost/speed preferences.
+- **Limits** — how many review iterations, how much spend, any deadline, and conditions
+  under which to stop, check in, or just notify.
 
 Only ask what the repo and the goal don't already answer. A clear small ask needs zero
 questions. Then record it:
 
-**`contract_set({goal, constraints?, permission_mode?})`** →
+**`contract_set({goal, target?, conditions?, budget_usd?, deadline?, constraints?,
+permission_mode?})`** →
 
+- `target: {label, value?}` — the measurable bar for done, from the conversation
+  (e.g. `{label: "all tests green"}`, `{label: "p95 latency", value: "<200ms"}`). This is
+  what you judge each batch against at review time.
+- `conditions: [{kind, text}]` — `stop` (advisory context for your review verdict — weigh
+  it, decide), `hold` (ask the user in this chat before proceeding), `ping` (notify the
+  user and continue). Capture these from what the user says, don't invent them.
+- `budget_usd`, `deadline` (ISO), `constraints.max_iterations` (1-20) — **hard caps the
+  engine enforces** when you try to append another batch; you don't police them yourself.
 - `constraints.model_policy`: `frontier` (default) | `cheap` (every tier a notch down) |
   `any` | `open_source` — **be honest: open_source is recorded but not available yet**
   (OpenRouter workers are coming); v1 routes to Claude models.
@@ -124,11 +137,13 @@ Then:
 
 1. **Arm the watcher** exactly as the tool response instructs: run the `watch` command as
    a **background Bash task** (`run_in_background: true`). It exits when something
-   noteworthy happens (task done/failed, ⚡ needs-you) and its completion wakes you.
+   noteworthy happens (task done/failed, ⚡ needs-you, ⚡ review needed) and its completion
+   wakes you.
 2. **End your turn** with a short kickoff summary (what's running, what's queued). The
    session stays fully usable — the user can keep working with you on anything.
 3. **When the watcher completes**: relay its digest in one or two lines, act on anything
-   that needs you (below), then **re-arm the watcher** — until the mission completes.
+   that needs you (below, or the review loop in §5), then **re-arm the watcher** — until
+   you finalize the mission with `mission_review_submit`.
    If a watcher notification arrives while you're mid-something-else, a one-line relay is
    enough; don't derail the user's current thread.
 4. On demand: `mission_status` (brief table), `task_logs` (one task's output — pull only
@@ -139,7 +154,8 @@ Then:
 - "tell the UI task to use shadcn" → `task_steer({taskId: "build-ui", message})` (slugs work as ids).
 - "pause/kill the flaky one" → `task_interrupt` (resumable) / `task_stop` (cancels + cascades).
 - New work while running → `mission_plan_submit` again: it **appends** a batch (deps may
-  reference existing task ids).
+  reference existing task ids). Every post-start append counts as one review iteration
+  toward the contract's cap.
 
 **⚡ Attention items** — a `guarded` worker hit a risky op (destructive command, sensitive
 path, MCP write) or asked a question and is **parked** until resolved:
@@ -153,26 +169,44 @@ path, MCP write) or asked a question and is **parked** until resolved:
 PreToolUse hook warns you once per file (`.medley/active-work.json` lists live claims).
 Pass the warning to the user; proceed only on their OK.
 
-## 5. Completion
+## 5. The review loop
 
-When the digest says the mission completed (or `mission_status` shows all tasks terminal):
+When a batch finishes, the engine does **not** finalize — it holds the mission open and
+the digest emits your trigger: `⚡ batch finished — review needed: check outcomes against
+the contract, then mission_plan_submit (next batch) or mission_review_submit (done)`.
+You are the review gate. Each time it fires:
 
 1. `mission_status({detail: "full"})` — per-task outcomes, blockers, the **files-changed union**.
 2. **Review the result yourself** — you're a full agent in the repo: read the diff or the
-   produced deliverables, run the contract's verify commands (tests/build) if the user wants.
-3. Give the completion digest: per-task one-liners, files changed, anything blocked or
-   deferred, and concrete next steps (run tests, commit, follow-up mission).
+   produced deliverables, run the contract's verify commands (tests/build).
+3. **Judge against the contract** — is the target met? Weigh any `stop` conditions in your
+   verdict (they're advisory context, not automatic). A tripped `hold` condition → ask the
+   user in this chat before proceeding.
+4. **Verdict — one of two calls:**
+   - **Not done, more work** → `mission_plan_submit` with the next batch (a post-start
+     submit appends a fresh batch and counts as one iteration). If the engine rejects it
+     with an iteration-cap / budget / deadline error, stop: review-submit instead.
+   - **Done, or must stop** → `mission_review_submit({summary, target_met})` — stamps the
+     review and finalizes the mission.
+
+The iteration cap, budget, and deadline are engine-enforced on the append path — you never
+police them yourself, but **be honest in `summary`** when stopping at a cap with the target
+unmet. After finalizing, give the completion digest: per-task one-liners, files changed,
+anything blocked or deferred, and concrete next steps (run tests, commit, follow-up mission).
 
 A failed task (`✗`) is not the end: `task_logs` it, then `task_resume({taskId, message})`
-to retry with guidance, or replan around it.
+to retry with guidance, or replan around it in the next batch.
 
 ## Recovery (restart / compaction)
 
 If a SessionStart reminder says a mission is active but workers aren't live (the engine
 dies with the session), call **`mission_resume`** — the supervisor re-derives everything
-from disk and re-spawns the runnable frontier; parked questions stay parked. After a
-compaction, the same reminder + `mission_status` re-anchor you. `attention_list` is the
-user's "what's pending?" recovery hatch at any time.
+from disk and re-spawns the runnable frontier; parked questions stay parked. Then check
+**`mission_status`** immediately: a terminal batch you hadn't reviewed shows an explicit
+"⚡ review pending" line there (and a watcher's timeout prints the same backstop line) —
+pick the loop back up at §5 right away rather than waiting on a wake. After a compaction,
+the same reminder + `mission_status` re-anchor you.
+`attention_list` is the user's "what's pending?" recovery hatch at any time.
 
 ## Boundaries
 

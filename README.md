@@ -35,7 +35,7 @@ flaky one"). Open the dashboard any time with `/dashboard`.
 ```
 
 ### Requirements
-- macOS (arm64/x64) or Linux (x64/arm64). The engine is a self-contained binary — **Node is not required**.
+- macOS (arm64/x64). The engine is a self-contained binary — **Node is not required**.
 - The `claude` CLI on your PATH (workers spawn via the Claude Agent SDK for subscription auth).
 - Optional: the `codex` CLI (`codex login`) to add Codex workers to the routing pool.
 - Optional: the `agent` CLI (`agent login`, from [cursor.com/install](https://cursor.com/install))

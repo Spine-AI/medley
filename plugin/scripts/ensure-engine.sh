@@ -31,8 +31,7 @@ fi
 os="$(uname -s)"; arch="$(uname -m)"
 case "$os" in
   Darwin) os_tag="darwin" ;;
-  Linux)  os_tag="linux" ;;
-  *) echo "medley: unsupported OS '$os' (need macOS or Linux)." >&2; exit 0 ;;
+  *) echo "medley: Medley is macOS-only (this is $os)." >&2; exit 0 ;;
 esac
 case "$arch" in
   arm64|aarch64) arch_tag="arm64" ;;

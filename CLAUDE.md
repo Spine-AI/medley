@@ -30,7 +30,7 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
 - `scripts/resolve-engine.sh` — pure resolver. Order: `$MEDLEY_ENGINE` (dev, `.cjs` or binary) →
   `${CLAUDE_PLUGIN_DATA}/bin/medley-engine-<version>` → `~/.medley/engine-path` cache.
 - `scripts/ensure-engine.sh` — SessionStart bootstrap. Reads `engine/version`, maps `uname`
-  → asset (`medley-engine-{darwin,linux}-{arm64,x64}`), `curl`s it + `SHA256SUMS` from the R2 CDN
+  → asset (`medley-engine-darwin-{arm64,x64}`), `curl`s it + `SHA256SUMS` from the R2 CDN
   (`updates.getmedley.ai/engine/v<version>`) — falling back to this repo's GitHub Release —
   verifies the checksum, `chmod +x`, caches it. No-ops for workers
   (`MEDLEY_WORKER=1`) and the dev override. Fails soft (session still starts).

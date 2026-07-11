@@ -59,14 +59,22 @@ permission_mode?})`** →
   workspace-write sandbox contains risky ops instead of pausing on them; codex worker
   *questions* still park for the user like any attention item. Say this if the user picks
   `guarded` and codex tasks are in play.
+  **Cursor caveat**: cursor tasks *are* approval-gated (same mechanism as claude-code —
+  risky ops pause for you to resolve), but a cursor worker has no first-class "ask the user
+  a question" channel — it can only surface mid-task uncertainty by triggering the
+  permission gate on a risky tool call, not by raising a clean attention item the way
+  claude-code or codex (via its ask-user tool) can. Say this if a cursor task is likely to
+  hit genuine ambiguity it would otherwise want to ask about.
 
-It returns the **routing rubric** (complexity class → model, per ready runtime — codex
-appears when the `codex` CLI is installed and logged in). Echo the contract back to the
+It returns the **routing rubric** (complexity class → model, per ready runtime — a runtime
+appears only when its CLI is installed and logged in: `claude` always, `codex` and `agent`
+[Cursor] optionally. Medley auto-discovers whichever subset is present — a user with only
+one or two of the three still gets a working pool). Echo the contract back to the
 user in 2-3 lines: goal, constraints, permission mode, and the rubric — e.g.
-"claude: simple→Haiku, standard→Sonnet, complex→Opus · codex: simple→luna, …". When more
-than one runtime is ready, read the bundled `runtimes/<id>.md` guidance for each before
-decomposing, so per-task runtime fit is grounded in the policy docs rather than general
-knowledge.
+"claude: simple→Haiku, standard→Sonnet, complex→Opus · codex: simple→luna, … · cursor:
+simple→auto, …". When more than one runtime is ready, read the bundled `runtimes/<id>.md`
+guidance for each before decomposing, so per-task runtime fit is grounded in the policy
+docs rather than general knowledge.
 
 ## 2. Decompose — design the task DAG
 
@@ -102,10 +110,12 @@ Per node:
   the per-runtime guidance (`runtimes/<id>.md`): repo-reasoning, multi-file refactors,
   review/verification, and ambiguous or quality-critical work → `claude-code`;
   terminal-native command-driven loops (build/CI/test-running/env setup), well-specified
-  self-contained implementation, and bulk mechanical batches → `codex`. Runtime choice
-  is yours to make silently — never a question to the user. (Omitting the field falls
-  back to the deterministic prefer order, which resolves to claude-code by default — a
-  fallback, not a recommendation.)
+  self-contained implementation, and bulk mechanical batches → `codex`; typical well-scoped
+  feature/bugfix work with no strong reason to prefer one model family, or when model
+  diversity itself is useful (a second opinion alongside claude-code/codex) → `cursor`.
+  Runtime choice is yours to make silently — never a question to the user. (Omitting the
+  field falls back to the deterministic prefer order, which resolves to claude-code by
+  default — a fallback, not a recommendation.)
 - **dependsOn** — parent slugs; `[]` for roots. **Prose ordering does nothing** — only
   these edges gate execution.
 

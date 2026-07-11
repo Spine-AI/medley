@@ -2,8 +2,8 @@
 
 Medley turns a complex, multi-step goal into a supervised swarm. **`/mission <your goal>`** makes
 your Claude Code session the mission agent: it interviews you, decomposes the goal into a task DAG
-with per-task model routing, and supervises parallel in-repo workers (Claude Code **and** Codex)
-that inherit your full setup — skills, MCP servers, `CLAUDE.md`, permission grants, subscription
+with per-task model routing, and supervises parallel in-repo workers (Claude Code, Codex, **and**
+Cursor) that inherit your full setup — skills, MCP servers, `CLAUDE.md`, permission grants, subscription
 auth. A live localhost **dashboard** streams every worker, surfaces approvals, and lets you steer
 in plain language.
 
@@ -47,6 +47,10 @@ flaky one"). Open the dashboard any time with `/dashboard`.
 - Node ≥ 22.5.0 (the engine also supports Node 20/23/24/25/26).
 - The `claude` CLI on your PATH (workers spawn via the Claude Agent SDK for subscription auth).
 - Optional: the `codex` CLI (`codex login`) to add Codex workers to the routing pool.
+- Optional: the `agent` CLI (`agent login`, from [cursor.com/install](https://cursor.com/install))
+  to add Cursor workers to the routing pool.
+- Any subset works — Medley auto-discovers whichever of these are installed and logged in, and
+  routes only among the runtimes actually present.
 
 ## Update
 

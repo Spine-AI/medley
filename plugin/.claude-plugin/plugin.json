@@ -7,5 +7,5 @@
   "homepage": "https://github.com/Spine-AI/medley",
   "repository": "https://github.com/Spine-AI/medley",
   "license": "MIT",
-  "keywords": ["missions", "orchestration", "agents", "task-dag", "parallel-workers", "mcp", "codex"]
+  "keywords": ["missions", "orchestration", "agents", "task-dag", "parallel-workers", "mcp", "codex", "cursor"]
 }

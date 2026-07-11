@@ -3,7 +3,7 @@
 This is the **public** Medley plugin repo. It contains only the thin, publishable plugin. The
 mission **engine is a separate, private repo** (`Spine-AI/medley-engine`) that builds a
 self-contained, code-signed binary. The binary is served from the **R2 CDN**
-(`updates.getmedley.ai/engine/`) and mirrored to a **public GitHub Release on THIS repo** as a
+(`engine.getmedley.ai`) and mirrored to a **public GitHub Release on THIS repo** as a
 fallback (so users download it with no auth), while the engine **source stays closed** — the release
 workflow in the engine repo uploads the compiled binaries to both.
 
@@ -31,7 +31,7 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
   `${CLAUDE_PLUGIN_DATA}/bin/medley-engine-<version>` → `~/.medley/engine-path` cache.
 - `scripts/ensure-engine.sh` — SessionStart bootstrap. Reads `engine/version`, maps `uname`
   → asset (`medley-engine-darwin-{arm64,x64}`), `curl`s it + `SHA256SUMS` from the R2 CDN
-  (`updates.getmedley.ai/engine/v<version>`) — falling back to this repo's GitHub Release —
+  (`engine.getmedley.ai/v<version>`) — falling back to this repo's GitHub Release —
   verifies the checksum, `chmod +x`, caches it. No-ops for workers
   (`MEDLEY_WORKER=1`) and the dev override. Fails soft (session still starts).
 - `scripts/run-engine.sh` — used by `.mcp.json`; resolves (downloading on demand) and execs the

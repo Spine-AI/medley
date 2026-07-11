@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SessionStart bootstrap: make sure the pinned Medley engine BINARY for this platform is downloaded
 # into the plugin's persistent data dir (${CLAUDE_PLUGIN_DATA}/bin). The engine ships as a
-# self-contained, code-signed executable served from the R2 CDN (updates.getmedley.ai/engine/) with
+# self-contained, code-signed executable served from the R2 CDN (engine.getmedley.ai) with
 # the public GitHub Release as a fallback mirror — so there is no auth, no npm, and no Node
 # requirement. Downloads only when the pinned version isn't already cached.
 # No-ops for workers and for the dev override. Fails soft (exits 0) so the session always starts.
@@ -41,7 +41,7 @@ esac
 asset="medley-engine-${os_tag}-${arch_tag}"
 # Primary: the R2 download CDN (branded domain, zero egress). Fallback: the public GitHub Release.
 # Both are populated by the engine repo's release workflow.
-base_r2="https://updates.getmedley.ai/engine/v${VERSION}"
+base_r2="https://engine.getmedley.ai/v${VERSION}"
 base_gh="https://github.com/Spine-AI/medley/releases/download/v${VERSION}"
 
 echo "medley: downloading engine ${VERSION} (${asset})…" >&2

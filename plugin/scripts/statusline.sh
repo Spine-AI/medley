@@ -9,7 +9,7 @@ ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
 [ -n "$ENGINE" ] || exit 0
 input=$(cat)
 project=$(printf '%s' "$input" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('workspace',{}).get('project_dir') or d.get('cwd') or '')" 2>/dev/null)
-[ -n "$project" ] && cd "$project" 2>/dev/null
+if [ -n "$project" ]; then cd "$project" 2>/dev/null || true; fi
 case "$ENGINE" in
   *.cjs|*.js|*.mjs) exec node "$ENGINE" status --statusline 2>/dev/null ;;
   *)                exec "$ENGINE" status --statusline 2>/dev/null ;;

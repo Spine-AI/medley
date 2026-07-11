@@ -1,8 +1,0 @@
-{
-  "name": "medley-engine-deps",
-  "private": true,
-  "description": "Pins the @spine-ai/medley-engine version the plugin installs into ${CLAUDE_PLUGIN_DATA} on first session. Release-managed — do not hand-edit; the engine repo's release workflow bumps this.",
-  "dependencies": {
-    "@spine-ai/medley-engine": "0.1.0"
-  }
-}

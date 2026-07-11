@@ -11,4 +11,7 @@ ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
 [ -n "$ENGINE" ] || exit 0
 # Cache the resolved path for contexts that lack the plugin env (e.g. the statusline command).
 mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$ENGINE" > "${HOME}/.medley/engine-path" 2>/dev/null || true
-exec node "$ENGINE" status --brief 2>/dev/null
+case "$ENGINE" in
+  *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief 2>/dev/null ;;
+  *)                exec "$ENGINE" status --brief 2>/dev/null ;;
+esac

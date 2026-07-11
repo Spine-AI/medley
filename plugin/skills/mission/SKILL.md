@@ -199,14 +199,16 @@ to retry with guidance, or replan around it in the next batch.
 
 ## Recovery (restart / compaction)
 
-If a SessionStart reminder says a mission is active but workers aren't live (the engine
-dies with the session), call **`mission_resume`** — the supervisor re-derives everything
-from disk and re-spawns the runnable frontier; parked questions stay parked. Then check
+The engine runs as a persistent per-repo **daemon** that outlives your session, so workers
+normally keep running across session boundaries and mission_resume is rarely needed. If a
+SessionStart reminder still says a mission is active but workers aren't live — a true daemon
+crash or a reboot — call **`mission_resume`**: the supervisor re-derives everything from disk
+and re-spawns the runnable frontier; parked questions stay parked. Then check
 **`mission_status`** immediately: a terminal batch you hadn't reviewed shows an explicit
 "⚡ review pending" line there (and a watcher's timeout prints the same backstop line) —
 pick the loop back up at §5 right away rather than waiting on a wake. After a compaction,
-the same reminder + `mission_status` re-anchor you.
-`attention_list` is the user's "what's pending?" recovery hatch at any time.
+the same reminder + `mission_status` re-anchor you. `attention_list` is the user's "what's
+pending?" recovery hatch at any time.
 
 ## Boundaries
 

@@ -11,9 +11,11 @@ user the URL it returns, e.g. "Medley dashboard: http://127.0.0.1:PORT/?token=�
 settings button (top right) has providers, routing tiers, and approval defaults."
 
 Notes:
-- The URL is engine-scoped: it dies with this session and a fresh session mints a new one
-  (this skill always returns the current one).
-- Outside a Claude Code session, run the engine's `dashboard` command directly against the
-  installed bundle — `node "$(cat ~/.medley/engine-path)" dashboard` — to start a standalone
-  dashboard (history + Settings; live worker control needs the owning session).
+- The URL is owned by the per-repo **daemon**, which outlives your session — so the same URL
+  stays live across sessions (it only changes when the daemon restarts, e.g. after an upgrade
+  or reboot). This skill always returns the current one.
+- Outside a Claude Code session, the daemon's dashboard is usually already up; check with
+  `"$(cat ~/.medley/engine-path)" daemon status` (the engine is a self-contained binary — run it
+  directly). If no daemon is running, start one with `"$(cat ~/.medley/engine-path)" daemon start`
+  (or `… dashboard` for a standalone, history-only view).
 - If the tool reports the server isn't running, relay that honestly — don't invent a URL.

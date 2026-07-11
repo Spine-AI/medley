@@ -7,30 +7,21 @@ that inherit your full setup — skills, MCP servers, `CLAUDE.md`, permission gr
 auth. A live localhost **dashboard** streams every worker, surfaces approvals, and lets you steer
 in plain language.
 
-This repository is the **public plugin**. The mission engine ships as a separate, versioned
-package that the plugin installs for you on first run — there's no build step and nothing to clone.
+This repository is the **public plugin**. The mission engine ships as a separate, self-contained
+binary that the plugin downloads for you on first run — no auth, no Node, no build step, nothing to
+clone.
 
 ## Install
 
-**1. One-time auth** (the engine is a private package, so npm needs a token once):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Spine-AI/medley/main/install.sh | bash
-# or, from a clone:  ./install.sh
-```
-
-It writes a scoped line to `~/.npmrc` (using your `gh` login if present, else a pasted token with
-the `read:packages` scope).
-
-**2. Add the plugin** inside Claude Code:
+Inside Claude Code:
 
 ```
 /plugin marketplace add Spine-AI/medley
 /plugin install medley
 ```
 
-That's it. Your **next session** installs the engine automatically (~30–60s, one-time — it fetches
-the right native `better-sqlite3` binary for your platform), then everything just works. No
+That's it. Your **next session** downloads the engine automatically (a single notarized binary for
+your platform, from GitHub Releases — no token, no npm), then everything just works. No
 `--plugin-dir`, no build toolchain.
 
 Then: `/mission <your goal>` → answer the interview → review the proposed DAG (each task's routed
@@ -44,7 +35,7 @@ flaky one"). Open the dashboard any time with `/dashboard`.
 ```
 
 ### Requirements
-- Node ≥ 22.5.0 (the engine also supports Node 20/23/24/25/26).
+- macOS (arm64/x64) or Linux (x64/arm64). The engine is a self-contained binary — **Node is not required**.
 - The `claude` CLI on your PATH (workers spawn via the Claude Agent SDK for subscription auth).
 - Optional: the `codex` CLI (`codex login`) to add Codex workers to the routing pool.
 
@@ -57,14 +48,14 @@ Engine updates are shipped by bumping the plugin. Refresh and update:
 /plugin update medley
 ```
 
-The next session detects the new pinned engine version and reinstalls it automatically. To re-run
-the auth step (e.g. token rotation), run `install.sh` again.
+The next session detects the new pinned engine version and downloads it automatically; the running
+engine daemon rolls itself to the new version on next use.
 
 ## Develop (this plugin)
 
 The plugin is self-contained; the only moving part is **how it finds the engine**. `scripts/resolve-engine.sh`
-picks, in order: `$MEDLEY_ENGINE` (dev override) → a sibling `../dist/medley-engine.cjs` → the copy
-installed under `${CLAUDE_PLUGIN_DATA}` → the path cached in `~/.medley/engine-path`.
+picks, in order: `$MEDLEY_ENGINE` (dev override) → the downloaded binary under
+`${CLAUDE_PLUGIN_DATA}/bin/medley-engine-<version>` → the path cached in `~/.medley/engine-path`.
 
 To hack on the plugin against a **local engine build** (from the private `medley-engine` repo):
 
@@ -93,9 +84,8 @@ plugin/
   hooks/hooks.json                SessionStart reminder + PreToolUse edit-conflict gate
   scripts/                        {resolve,ensure,run}-engine.sh, session-start.sh, statusline.sh,
                                   edit-conflict-gate.py
-  engine/package.json             pins the engine version installed into ${CLAUDE_PLUGIN_DATA}
+  engine/version                  pins the engine version the plugin downloads (release-managed)
   skills/mission, skills/dashboard the /mission and /dashboard skills (+ per-runtime routing guides)
-install.sh                        one-time private-registry auth
 ```
 
 ## License

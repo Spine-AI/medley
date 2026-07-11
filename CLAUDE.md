@@ -2,9 +2,10 @@
 
 This is the **public** Medley plugin repo. It contains only the thin, publishable plugin. The
 mission **engine is a separate, private repo** (`Spine-AI/medley-engine`) that builds a
-self-contained, notarized binary. The binary is published as a **public GitHub Release asset on THIS
-repo** (so users download it with no auth), while the engine **source stays closed** — the release
-workflow in the engine repo uploads the compiled binaries here.
+self-contained, code-signed binary. The binary is served from the **R2 CDN**
+(`updates.getmedley.ai/engine/`) and mirrored to a **public GitHub Release on THIS repo** as a
+fallback (so users download it with no auth), while the engine **source stays closed** — the release
+workflow in the engine repo uploads the compiled binaries to both.
 
 > Note: Claude Code does **not** load a plugin-repo `CLAUDE.md` into user sessions — this file is
 > contributor guidance only. User-facing behavior comes from the skills under `plugin/skills/`.
@@ -29,8 +30,9 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
 - `scripts/resolve-engine.sh` — pure resolver. Order: `$MEDLEY_ENGINE` (dev, `.cjs` or binary) →
   `${CLAUDE_PLUGIN_DATA}/bin/medley-engine-<version>` → `~/.medley/engine-path` cache.
 - `scripts/ensure-engine.sh` — SessionStart bootstrap. Reads `engine/version`, maps `uname`
-  → asset (`medley-engine-{darwin,linux}-{arm64,x64}`), `curl`s it + `SHA256SUMS` from this repo's
-  GitHub Release `v<version>`, verifies the checksum, `chmod +x`, caches it. No-ops for workers
+  → asset (`medley-engine-{darwin,linux}-{arm64,x64}`), `curl`s it + `SHA256SUMS` from the R2 CDN
+  (`updates.getmedley.ai/engine/v<version>`) — falling back to this repo's GitHub Release —
+  verifies the checksum, `chmod +x`, caches it. No-ops for workers
   (`MEDLEY_WORKER=1`) and the dev override. Fails soft (session still starts).
 - `scripts/run-engine.sh` — used by `.mcp.json`; resolves (downloading on demand) and execs the
   engine (a `.cjs` dev build via `node`; a binary directly).

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SessionStart bootstrap: make sure the pinned Medley engine BINARY for this platform is downloaded
 # into the plugin's persistent data dir (${CLAUDE_PLUGIN_DATA}/bin). The engine ships as a
-# self-contained, notarized executable published as a PUBLIC GitHub Release asset — so there is no
-# auth, no npm, and no Node requirement. Downloads only when the pinned version isn't already cached.
+# self-contained, code-signed executable served from the R2 CDN (updates.getmedley.ai/engine/) with
+# the public GitHub Release as a fallback mirror — so there is no auth, no npm, and no Node
+# requirement. Downloads only when the pinned version isn't already cached.
 # No-ops for workers and for the dev override. Fails soft (exits 0) so the session always starts.
 set -u
 
@@ -39,7 +40,10 @@ case "$arch" in
   *) echo "medley: unsupported architecture '$arch'." >&2; exit 0 ;;
 esac
 asset="medley-engine-${os_tag}-${arch_tag}"
-base="https://github.com/Spine-AI/medley/releases/download/v${VERSION}"
+# Primary: the R2 download CDN (branded domain, zero egress). Fallback: the public GitHub Release.
+# Both are populated by the engine repo's release workflow.
+base_r2="https://updates.getmedley.ai/engine/v${VERSION}"
+base_gh="https://github.com/Spine-AI/medley/releases/download/v${VERSION}"
 
 echo "medley: downloading engine ${VERSION} (${asset})…" >&2
 mkdir -p "$BIN_DIR"
@@ -47,7 +51,13 @@ tmp="$(mktemp)"
 sums="$(mktemp)"
 cleanup() { rm -f "$tmp" "$sums"; }
 
-if ! curl -fsSL "${base}/${asset}" -o "$tmp"; then
+# Try R2 first, then the GitHub Release. Remember which origin served the binary so the checksum
+# file is fetched from the same place.
+base=""
+for b in "$base_r2" "$base_gh"; do
+  if curl -fsSL "${b}/${asset}" -o "$tmp"; then base="$b"; break; fi
+done
+if [ -z "$base" ]; then
   cleanup
   echo "medley: engine download failed (network?) — will retry next session." >&2
   exit 0

@@ -35,7 +35,12 @@ case "$os" in
 esac
 case "$arch" in
   arm64|aarch64) arch_tag="arm64" ;;
-  x86_64|amd64)  arch_tag="x64" ;;
+  x86_64|amd64)
+    # Medley ships a macOS arm64 binary only — there is no darwin-x64 asset to download.
+    echo "medley: requires an Apple Silicon (arm64) Mac. This shell reports x86_64 — if you're on" >&2
+    echo "        Apple Silicon it's running under Rosetta 2; relaunch Claude Code in a native arm64" >&2
+    echo "        terminal. (Intel Macs are not supported.)" >&2
+    exit 0 ;;
   *) echo "medley: unsupported architecture '$arch'." >&2; exit 0 ;;
 esac
 asset="medley-engine-${os_tag}-${arch_tag}"

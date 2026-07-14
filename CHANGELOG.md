@@ -3,6 +3,17 @@
 All notable changes to the Medley plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). The plugin version tracks the engine version it pins.
 
+## [0.4.0] — 2026-07-14
+
+### Changed
+- **One shared daemon for every repo (was one daemon per repo).** All Claude sessions now talk to a
+  single background daemon over `http://localhost:8730`, backed by one shared SQLite DB; each session
+  declares its repo on the wire, so the daemon keeps every repo's missions isolated by project. No
+  plugin-script change was needed — the `mcp` proxy sends the repo header itself.
+- **Unified dashboard.** The web dashboard now lists every repo's missions in one place, and
+  `dashboard_url` deep-links straight to your current mission (`?mission=…`); the first
+  `mission_start` auto-opens that deep link. `/mission` + `/dashboard` docs updated.
+
 ## [0.1.0] — unreleased
 
 ### Added

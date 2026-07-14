@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "medley",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Medley missions inside Claude Code: /mission decomposes a complex goal into a task DAG, routes each task to the right model, and supervises parallel in-repo workers that inherit your full setup.",
   "author": { "name": "Spine", "email": "engineering@getspine.ai" },
   "homepage": "https://github.com/Spine-AI/medley",

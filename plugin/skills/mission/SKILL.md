@@ -263,8 +263,9 @@ anything deferred, and concrete next steps (commit, follow-up mission).
 
 ## Recovery (restart / compaction)
 
-The engine runs as a persistent per-repo **daemon** that outlives your session, so workers
-normally keep running across session boundaries and mission_resume is rarely needed. If a
+The engine runs as a single persistent **daemon** (shared across all your repos) that outlives
+your session, so workers normally keep running across session boundaries and mission_resume is
+rarely needed. If a
 SessionStart reminder still says a mission is active but workers aren't live — a true daemon
 crash or a reboot — call **`mission_resume`**: the supervisor re-derives everything from disk
 and re-spawns the runnable frontier; parked questions stay parked. Then check

@@ -11,7 +11,7 @@
 #    (from .medley/active-work.json); the same edit goes through on retry.
 #
 # Stdlib only, fast, never invokes the engine. No JSON output = allow.
-import sys, json, os, hashlib, pathlib, re, shlex
+import sys, json, os, hashlib, pathlib, re, shlex, shutil
 
 # Workers inherit the plugin (settingSources) and edit exactly the files listed in
 # active-work.json — their OWN files. The gate is for the HOST session only.
@@ -101,18 +101,75 @@ FIND_MUTATING = {
     "-delete", "-exec", "-execdir", "-ok", "-okdir",
     "-fprint", "-fprintf", "-fprint0", "-fls",
 }
+# Read-only verbs of the ENGINE'S OWN binary (declared in mission-state.json as
+# engine.execPath/.entry, realpath-verified below). The gate must pass every command the
+# engine itself instructs the host to run: mission_start hands out `… watch` (the progress
+# watcher the mission agent re-arms all mission long), and the Bash deny message below
+# recommends `medley-engine service status`. All are WAL/log READERS; daemon-mutating verbs
+# (service stop/restart/install, mcp, …) stay denied — mission_pause is still the hatch.
+ENGINE_READONLY_VERBS = {"watch", "status"}
+ENGINE_READONLY_SERVICE = {"status", "logs"}
 # sed scripts are WHITELISTED, not blacklisted: numeric/$ addresses + print-only commands
 # (p d q n =). Regex-address forms like /foo/p are conservatively denied — false negatives
 # are accepted; `sed -n 'w file'` writes and `sed -n 'e cmd'` executes even under -n.
 SED_SAFE_SCRIPT = re.compile(r"[0-9,$;=pdqn!\s]*\Z")
 CONNECTORS = {"&&", "||", ";", "|"}
 PUNCT_CHARS = set("();<>|&")
+# The shell only treats NAME=value as an assignment when NAME is a valid identifier —
+# `./build=release.sh` is a COMMAND. (env is looser: it assigns on any '=', so the env
+# branch keeps its bare `"=" in token` test.)
+SHELL_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def segment_is_readonly(tokens) -> bool:
+def _same_file(a: str, b: str) -> bool:
+    try:
+        return os.path.realpath(a) == os.path.realpath(b)
+    except Exception:
+        return False
+
+
+def engine_readonly(tokens, engine) -> bool:
+    """True iff tokens invoke the daemon's own declared binary with a read-only verb.
+    engine.execPath is the running binary (pkg) or node itself (dev, where engine.entry is
+    the bundle both must match). A bare `medley-engine` head resolves through PATH first, so
+    the deny message's own `medley-engine service status` suggestion passes when a shim/
+    symlink to the real binary is installed."""
+    if not isinstance(engine, dict) or not tokens:
+        return False
+    exec_path = engine.get("execPath")
+    if not isinstance(exec_path, str) or not exec_path:
+        return False
+    head = tokens[0] if "/" in tokens[0] else (shutil.which(tokens[0]) or tokens[0])
+    if not _same_file(head, exec_path):
+        return False
+    args = tokens[1:]
+    entry = engine.get("entry")
+    if isinstance(entry, str) and entry:
+        if not args or not _same_file(args[0], entry):
+            return False
+        args = args[1:]
+    if not args:
+        return False
+    verb, rest = args[0], args[1:]
+    if verb in ENGINE_READONLY_VERBS:
+        return True
+    return verb == "service" and bool(rest) and rest[0] in ENGINE_READONLY_SERVICE
+
+
+def segment_is_readonly(tokens, engine=None) -> bool:
     if not tokens:
         return False
+    # Leading bare VAR=value assignments are inert — the shell scopes them to the command
+    # that follows (same rule the env branch applies). A segment that is ONLY assignments
+    # executes nothing. This is what lets mission_start's own watch command
+    # (`MEDLEY_DATA_DIR="…" CLAUDE_PROJECT_DIR="…" <engine> watch`) through.
+    while tokens and SHELL_ASSIGNMENT.match(tokens[0]):
+        tokens = tokens[1:]
+    if not tokens:
+        return True
     head, rest = tokens[0], tokens[1:]
+    if engine_readonly(tokens, engine):
+        return True
     # '<bin> --version' / '<bin> -v' probes are harmless for any binary.
     if len(tokens) == 2 and rest[0] in ("--version", "-v"):
         return True
@@ -129,7 +186,7 @@ def segment_is_readonly(tokens) -> bool:
             return True
         if body[0].startswith("-"):
             return False
-        return segment_is_readonly(body)
+        return segment_is_readonly(body, engine)
     if head == "find":
         # find is read-only only without its mutating/executing primaries.
         return not any(t in FIND_MUTATING for t in rest)
@@ -163,7 +220,7 @@ def segment_is_readonly(tokens) -> bool:
         return has_n and all(SED_SAFE_SCRIPT.match(s) for s in scripts)
     if head == "xargs":
         # Only when the command xargs itself runs is allowlisted.
-        return segment_is_readonly(rest)
+        return segment_is_readonly(rest, engine)
     if head == "git":
         if not rest:
             return False
@@ -180,7 +237,7 @@ def segment_is_readonly(tokens) -> bool:
     return False
 
 
-def command_is_readonly(cmd: str) -> bool:
+def command_is_readonly(cmd: str, engine=None) -> bool:
     if not isinstance(cmd, str) or not cmd.strip():
         return False
     # Command substitution can hide anything; deny even inside quotes.
@@ -209,7 +266,7 @@ def command_is_readonly(cmd: str) -> bool:
         segments.pop()  # trailing ';' is fine
     if not segments or any(not s for s in segments):
         return False  # empty command or dangling connector → parse anomaly
-    return all(segment_is_readonly(s) for s in segments)
+    return all(segment_is_readonly(s, engine) for s in segments)
 
 
 state = load_lockdown_state(project)
@@ -239,7 +296,7 @@ if state is not None:
         sys.exit(0)  # outside the repo (scratchpads, ~/.claude plans) → allow
     if tool_name == "Bash":
         cmd = tool_input.get("command") or ""
-        if command_is_readonly(cmd):
+        if command_is_readonly(cmd, state.get("engine")):
             sys.exit(0)
         deny(
             f'STOP: Medley mission "{title}" is running — only read-only commands '

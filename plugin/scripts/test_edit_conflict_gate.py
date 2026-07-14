@@ -5,6 +5,7 @@
 # a synthetic hook payload, exactly the way Claude Code does.
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,7 +41,7 @@ class GateTestCase(unittest.TestCase):
         os.makedirs(os.path.join(self.repo, ".medley"))
         self.addCleanup(self._tmp.cleanup)
 
-    def write_state(self, lockdown=True, pid=None, title="Ship the widget"):
+    def write_state(self, lockdown=True, pid=None, title="Ship the widget", engine=None):
         state = {
             "updatedAt": 1234567890000,
             "lockdown": lockdown,
@@ -49,6 +50,8 @@ class GateTestCase(unittest.TestCase):
             "reason": "mission running — repo is read-only for the host session",
             "escape": "mission_pause releases the repo; mission_stop cancels",
         }
+        if engine is not None:
+            state["engine"] = engine
         with open(os.path.join(self.repo, ".medley", "mission-state.json"), "w") as f:
             json.dump(state, f)
 
@@ -184,6 +187,10 @@ class TestLockdownDenials(GateTestCase):
         "sed -n '1,20p' file",
         "sed -n -e 5p -e 10q file",
         "find . -name '*.py' -type f",
+        # Leading VAR=value assignments are inert — same rule as the env branch.
+        "FOO=1 git status",
+        "CLAUDE_PROJECT_DIR=/x ls",
+        "FOO=bar",  # pure assignment executes nothing
     ]
 
     DENIED_BASH = [
@@ -231,6 +238,13 @@ class TestLockdownDenials(GateTestCase):
         "sed -n 's/a/b/w out' f",
         "sed -n -f script.sed f",  # script from file is unknowable
         "sed -n '/foo/p' f",  # regex address: conservative false negative
+        # Assignment stripping must not weaken the check on the command that follows.
+        "PATH=/evil rm -rf x",
+        "FOO=1 npm test",
+        # Only NAME=value with a valid identifier is an assignment — these are COMMANDS.
+        "./build=release.sh",
+        "./deploy=prod.sh ls",
+        "=foo",
     ]
 
     def test_bash_allowlist(self):
@@ -241,6 +255,104 @@ class TestLockdownDenials(GateTestCase):
             reason = self.deny_reason("Bash", {"command": cmd})
             self.assertIn("mission_pause", reason, f"deny for {cmd!r} must name mission_pause")
             self.assertIn("Ship the widget", reason)
+
+
+class TestEngineBinaryCarveOut(GateTestCase):
+    """The daemon declares its own binary in mission-state.json (engine.execPath/.entry);
+    the gate realpath-verifies it and passes its read-only verbs — mission_start's own watch
+    command must survive lockdown. Anything else about the binary stays denied."""
+
+    def setUp(self):
+        super().setUp()
+        self.bindir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.bindir, ignore_errors=True)
+        self.engine = os.path.join(self.bindir, "medley-engine")
+        with open(self.engine, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(self.engine, 0o755)
+
+    def assert_bash(self, cmd, expect_allow, env_extra=None):
+        code, decision = self.gate("Bash", {"command": cmd}, env_extra)
+        expected = (0, None) if expect_allow else (0, "deny")
+        self.assertEqual((code, decision), expected,
+                         f"should {'ALLOW' if expect_allow else 'DENY'}: {cmd!r}")
+
+    def test_watch_command_as_handed_out_by_mission_start(self):
+        # The exact shape orchestrator-mcp.ts builds for a pkg binary.
+        self.write_state(engine={"execPath": self.engine})
+        self.assert_bash(
+            f'MEDLEY_DATA_DIR="/tmp/data" CLAUDE_PROJECT_DIR="{self.repo}" "{self.engine}" watch',
+            expect_allow=True,
+        )
+
+    def test_engine_readonly_verbs_allowed(self):
+        self.write_state(engine={"execPath": self.engine})
+        for cmd in (
+            f'"{self.engine}" watch',
+            f'"{self.engine}" status',
+            f'"{self.engine}" service status',
+            f'"{self.engine}" service logs',
+        ):
+            self.assert_bash(cmd, expect_allow=True)
+
+    def test_engine_mutating_or_unknown_verbs_denied(self):
+        self.write_state(engine={"execPath": self.engine})
+        for cmd in (
+            f'"{self.engine}"',  # bare invocation
+            f'"{self.engine}" mcp',
+            f'"{self.engine}" service stop',
+            f'"{self.engine}" service restart',
+            f'"{self.engine}" service',
+        ):
+            self.assert_bash(cmd, expect_allow=False)
+
+    def test_engine_verb_does_not_bless_other_segments(self):
+        # The carve-out is per-segment — a connector chain still checks everything.
+        self.write_state(engine={"execPath": self.engine})
+        self.assert_bash(f'"{self.engine}" watch && npm test', expect_allow=False)
+        self.assert_bash(f'"{self.engine}" watch; rm -rf x', expect_allow=False)
+
+    def test_dev_mode_node_entry_form(self):
+        # Dev mode: execPath is node itself, entry is the bundle — BOTH must match.
+        bundle = os.path.join(self.bindir, "medley-engine.cjs")
+        open(bundle, "w").close()
+        self.write_state(engine={"execPath": self.engine, "entry": bundle})
+        # The exact dev-mode shape orchestrator-mcp.ts hands out (env prefix included).
+        self.assert_bash(
+            f'MEDLEY_DATA_DIR="" CLAUDE_PROJECT_DIR="{self.repo}" "{self.engine}" "{bundle}" watch',
+            expect_allow=True,
+        )
+        self.assert_bash(f'"{self.engine}" "{bundle}" watch', expect_allow=True)
+        self.assert_bash(f'"{self.engine}" "{os.path.join(self.bindir, "other.cjs")}" watch',
+                         expect_allow=False)
+        self.assert_bash(f'"{self.engine}" watch', expect_allow=False)  # entry missing
+
+    def test_spoofed_binary_denied(self):
+        # Same basename, different file — realpath comparison must reject it.
+        otherdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, otherdir, ignore_errors=True)
+        impostor = os.path.join(otherdir, "medley-engine")
+        open(impostor, "w").close()
+        self.write_state(engine={"execPath": self.engine})
+        self.assert_bash(f'"{impostor}" watch', expect_allow=False)
+
+    def test_bare_name_resolves_through_path_and_symlink(self):
+        # `medley-engine service status` (the deny message's own suggestion) passes when a
+        # PATH shim symlinks to the declared binary.
+        shimdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, shimdir, ignore_errors=True)
+        os.symlink(self.engine, os.path.join(shimdir, "medley-engine"))
+        self.write_state(engine={"execPath": self.engine})
+        path = shimdir + os.pathsep + os.environ.get("PATH", "")
+        self.assert_bash("medley-engine service status", expect_allow=True,
+                         env_extra={"PATH": path})
+        self.assert_bash("medley-engine service stop", expect_allow=False,
+                         env_extra={"PATH": path})
+
+    def test_no_engine_declared_keeps_denying(self):
+        # Old daemon writing no engine field → today's conservative behavior.
+        self.write_state()
+        self.assert_bash(f'"{self.engine}" watch', expect_allow=False)
 
 
 if __name__ == "__main__":

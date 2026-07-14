@@ -13,6 +13,17 @@ ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
 if mkdir -p "${HOME}/.medley" 2>/dev/null; then
   printf '%s\n' "$ENGINE" > "${HOME}/.medley/engine-path" 2>/dev/null || true
 fi
+# Pre-warm the shared daemon out-of-band so it's already up (or already warming) by the time the MCP
+# server (.mcp.json → run-engine.sh mcp) attaches. Otherwise a cold session pays the daemon boot +
+# health poll INSIDE Claude Code's MCP init window and tools can fail to register on session 1.
+# Fully detached `( … & )` so the hook never blocks; `service start` no-ops fast when a healthy
+# daemon already answers. Skipped for the legacy in-process mode.
+if [ "${MEDLEY_DAEMON:-}" != "0" ]; then
+  case "$ENGINE" in
+    *.cjs|*.js|*.mjs) ( node "$ENGINE" service start >/dev/null 2>&1 & ) ;;
+    *)                ( "$ENGINE" service start >/dev/null 2>&1 & ) ;;
+  esac
+fi
 # One-time statusline offer: if no statusLine is configured, ask the host to OFFER wiring the
 # medley statusline (never auto-write settings; never suggest replacing an existing one).
 # The marker makes this a single-shot regardless of the outcome. Fail-soft throughout.

@@ -7,8 +7,14 @@ description: Open the Medley web dashboard — one shared UI listing every repo'
 
 Call the `dashboard_url` tool on the `medley` MCP server (if it isn't loaded yet:
 ToolSearch `"select:mcp__plugin_medley_medley__dashboard_url"`, then call it) and give the
-user the URL it returns, e.g. "Medley dashboard: http://localhost:8730/?mission=… — the
+user **exactly the URL it returns** — e.g. "Medley dashboard: http://127.0.0.1:8730/?mission=… — the
 settings button (top right) has providers, routing tiers, and approval defaults."
+
+**Relay the tool's URL verbatim — never assume `localhost` or port `8730`.** The daemon advertises the
+`127.0.0.1` literal (a bare `localhost` URL hangs on macOS, which resolves it to IPv6 `::1` where the
+IPv4-bound server isn't listening), and it walks to the next free port if `8730` is taken — so the
+exact host and port can differ. If the user set up the branded domain (`service dashboard --setup`),
+the tool returns `http://dashboard.medley:<port>/` instead.
 
 Notes:
 - **One shared dashboard for every repo.** A single background **daemon** serves all your repos, so

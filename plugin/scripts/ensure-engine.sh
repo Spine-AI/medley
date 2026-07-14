@@ -49,8 +49,26 @@ asset="medley-engine-${os_tag}-${arch_tag}"
 base_r2="https://engine.getmedley.ai/v${VERSION}"
 base_gh="https://github.com/Spine-AI/medley/releases/download/v${VERSION}"
 
-echo "medley: downloading engine ${VERSION} (${asset})…" >&2
 mkdir -p "$BIN_DIR"
+# Single-flight download lock. On a cold first session, session-start.sh AND run-engine.sh (via
+# .mcp.json) can call this concurrently — without a lock they'd fire two curls at the same path and
+# race the `mv`. An atomic `mkdir` lock means exactly ONE process downloads; the others wait for the
+# binary to appear (bounded) and reuse it. Fail-soft: a stale lock (downloader died) is reclaimed.
+LOCK_DIR="${BIN_DIR}/.downloading-${VERSION}.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  for _ in $(seq 1 180); do   # ~90s: wait out the other process's download instead of double-fetching
+    if [ -x "$BIN_PATH" ]; then
+      mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$BIN_PATH" > "${HOME}/.medley/engine-path" 2>/dev/null
+      exit 0
+    fi
+    sleep 0.5
+  done
+  rmdir "$LOCK_DIR" 2>/dev/null || true   # looks stale — reclaim and download ourselves
+  mkdir "$LOCK_DIR" 2>/dev/null || true
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+echo "medley: downloading engine ${VERSION} (${asset})…" >&2
 tmp="$(mktemp)"
 sums="$(mktemp)"
 cleanup() { rm -f "$tmp" "$sums"; }
@@ -87,6 +105,10 @@ fi
 chmod +x "$tmp"
 mv "$tmp" "$BIN_PATH"
 rm -f "$sums"
+# Prune superseded binaries — only the pinned version is ever run, and each is ~80MB, so old ones
+# (from prior /plugin updates) just pile up. Safe: macOS keeps a running binary's inode alive after
+# unlink, and stray old daemons are reaped by the engine on next boot. Fail-soft.
+find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' ! -name "medley-engine-${VERSION}" -delete 2>/dev/null || true
 mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$BIN_PATH" > "${HOME}/.medley/engine-path" 2>/dev/null
 echo "medley: engine ready." >&2
 exit 0

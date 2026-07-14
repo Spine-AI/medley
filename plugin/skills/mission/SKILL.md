@@ -11,13 +11,13 @@ skills, MCP servers, CLAUDE.md, permission grants, subscription auth) executes t
 **in this repo, in parallel**, supervised by the Medley engine behind the `medley` MCP
 server. Missions cover any complex multi-step goal — coding, research, analysis, writing,
 decision-making — not just code. You do **not** execute the mission's tasks yourself — you
-decompose, route, launch, supervise, steer, and review.
+decompose, route, launch, supervise, steer, and relay. The **engine reviews**.
 
-The loop: **interview → contract_set → decompose → mission_plan_submit → user approves in
-chat → mission_start → supervise (watcher + digests, steer, resolve attention) → batch
-terminal → ⚡ review against the contract → mission_plan_submit the next batch OR
-mission_review_submit → repeat until done.** The engine holds the mission open after each
-batch — you are the review gate.
+The loop: **interview → contract_set → decompose → mission_plan_submit (with
+planning_notes) → user approves in chat → mission_start → supervise (watcher + digests,
+steer, resolve attention) → the ENGINE reviews each finished batch and iterates or asks →
+relay verdicts → finalize → share the receipt.** The engine holds the mission open until
+every batch passes its review — the reviewer is the gate, you are the relay.
 
 ## 1. Interview — settle the contract
 
@@ -29,7 +29,8 @@ chat) about anything that changes the work or the bar for done:
 - **The standard for "done"** — concrete acceptance criteria and how they're verified
   (real test/build commands, behavior to check — or for non-code goals, concrete
   deliverable criteria: questions answered, sources cited, sections present). The most
-  often missing piece — get it.
+  often missing piece — get it. The commands become `verify_commands`: the **engine's
+  reviewer runs them** after every batch and judges from real output — not you.
 - **Constraints** — scope boundaries, files to leave alone, model/cost/speed preferences.
 - **Limits** — how many review iterations, how much spend, any deadline, and conditions
   under which to stop, check in, or just notify.
@@ -37,14 +38,20 @@ chat) about anything that changes the work or the bar for done:
 Only ask what the repo and the goal don't already answer. A clear small ask needs zero
 questions. Then record it:
 
-**`contract_set({goal, target?, conditions?, budget_usd?, deadline?, constraints?,
-permission_mode?})`** →
+**`contract_set({goal, target?, conditions?, verify_commands?, review_autonomy?,
+budget_usd?, deadline?, constraints?, permission_mode?})`** →
 
 - `target: {label, value?}` — the measurable bar for done, from the conversation
   (e.g. `{label: "all tests green"}`, `{label: "p95 latency", value: "<200ms"}`). This is
-  what you judge each batch against at review time.
-- `conditions: [{kind, text}]` — `stop` (advisory context for your review verdict — weigh
-  it, decide), `hold` (ask the user in this chat before proceeding), `ping` (notify the
+  what the engine's reviewer judges each batch against.
+- `verify_commands: string[]` — the real commands that prove the target (tests, build,
+  lint). The reviewer executes them per batch; get them in the interview.
+- `review_autonomy`: `gated` (default — the reviewer's follow-up proposals park as ⚡
+  attention for the user's call) | `auto` (mechanical fixes apply automatically; judgment
+  calls still park). Only set `auto` when the user asks for it. Reviewer turns spend
+  against the mission budget — say so if budget is tight.
+- `conditions: [{kind, text}]` — `stop` (advisory context for the reviewer's verdict),
+  `hold` (ask the user in this chat before proceeding), `ping` (notify the
   user and continue). Capture these from what the user says, don't invent them.
 - `budget_usd`, `deadline` (ISO), `constraints.max_iterations` (1-20) — **hard caps the
   engine enforces** when you try to append another batch; you don't police them yourself.
@@ -119,8 +126,11 @@ Per node:
 - **dependsOn** — parent slugs; `[]` for roots. **Prose ordering does nothing** — only
   these edges gate execution.
 
-**`mission_plan_submit({contractId, plan})`** validates (unique slugs, real deps, no
-cycles) and returns the routed model per task. Fix and resubmit on errors.
+**`mission_plan_submit({contractId, plan, planning_notes?})`** validates (unique slugs,
+real deps, no cycles) and returns the routed model per task. Fix and resubmit on errors.
+Always write `planning_notes`: a short handoff summary of the interview — what you and the
+user discussed, decisions made, why the plan is shaped this way. It's injected into every
+reviewer prompt and is the reviewer's **only window into this conversation**.
 
 ### Recurring triggers (scheduled work)
 
@@ -172,25 +182,30 @@ Then:
 
 1. **Arm the watcher** exactly as the tool response instructs: run the `watch` command as
    a **background Bash task** (`run_in_background: true`). It exits when something
-   noteworthy happens (task done/failed, ⚡ needs-you, ⚡ review needed) and its completion
-   wakes you.
+   noteworthy happens (task done/failed, ⚡ needs-you, 🔍 review activity/⚡ verdicts) and
+   its completion wakes you.
 2. **End your turn** with a short kickoff summary (what's running, what's queued). The
-   session stays fully usable — the user can keep working with you on anything.
+   conversation stays fully usable — but the repo does not (lockdown, below).
 3. **When the watcher completes**: relay its digest in one or two lines, act on anything
    that needs you (below, or the review loop in §5), then **re-arm the watcher** — until
-   you finalize the mission with `mission_review_submit`.
+   the engine finalizes the mission.
    If a watcher notification arrives while you're mid-something-else, a one-line relay is
    enough; don't derail the user's current thread.
 4. On demand: `mission_status` (brief table), `task_logs` (one task's output — pull only
    what you need, `summary` first), `mission_wait` (inline long-poll when the user says
    "wait for it").
 
+**Mission banner** — while a mission is active, lead **every reply** (whatever the topic)
+with a one-line banner: `MEDLEY · <title> · RUNNING · 4/9` — status from the latest
+digest/`mission_status` (`RUNNING` / `REVIEWING` / `⚡ NEEDS YOU (n)` / `⏸ PAUSED`,
+done/total tasks). It's the user's persistent signal that mission mode is on.
+
 **Steering** — the user redirects mid-flight:
 - "tell the UI task to use shadcn" → `task_steer({taskId: "build-ui", message})` (slugs work as ids).
 - "pause/kill the flaky one" → `task_interrupt` (resumable) / `task_stop` (cancels + cascades).
-- New work while running → `mission_plan_submit` again: it **appends** a batch (deps may
-  reference existing task ids). Every post-start append counts as one review iteration
-  toward the contract's cap.
+- New work while running → `mission_plan_submit` again: it **appends** a user-directed
+  batch (deps may reference existing task ids). Every post-start append counts as one
+  review iteration toward the contract's cap, and supersedes any open reviewer proposals.
 
 **⚡ Attention items** — a `guarded` worker hit a risky op (destructive command, sensitive
 path, MCP write) or asked a question and is **parked** until resolved:
@@ -200,37 +215,51 @@ path, MCP write) or asked a question and is **parked** until resolved:
   the worker unparks instantly. `allow_always` persists a durable grant for MCP tools
   (all current and future workers); for Bash/file approvals it covers that worker's session.
 
-**Edit conflicts**: while workers run, avoid editing files a running task owns — the
-PreToolUse hook warns you once per file (`.medley/active-work.json` lists live claims).
-Pass the warning to the user; proceed only on their OK.
+**Repo lockdown**: while the mission runs, the repo is **read-only for this session** —
+a gate denies your Edit/Write, subagents (Task), and mutating Bash inside the repo; reads,
+Grep/Glob, and read-only git pass, and everything outside the repo is untouched. The
+conversation stays fully usable — chat, plan, answer questions, work elsewhere. To change
+the repo, go **through the mission**: `task_steer` (redirect a worker),
+`mission_plan_submit` (append a task), or `mission_pause` (winds workers down gracefully
+and hands you the repo; `mission_resume` hands it back). Relay a denial to the user in one
+line — never try to work around the gate.
 
-## 5. The review loop
+## 5. The engine's review loop
 
-When a batch finishes, the engine does **not** finalize — it holds the mission open and
-the digest emits your trigger: `⚡ batch finished — review needed: check outcomes against
-the contract, then mission_plan_submit (next batch) or mission_review_submit (done)`.
-You are the review gate. Each time it fires:
+When a batch finishes, the **engine reviews it** — it spawns a reviewer (a real
+`review-<n>` task, visible on the dashboard) that reads the diff, runs the contract's
+`verify_commands`, and judges against the target. **You never review**: don't read diffs,
+don't run tests, don't issue verdicts yourself — relay what the engine reports:
 
-1. `mission_status({detail: "full"})` — per-task outcomes, blockers, the **files-changed union**.
-2. **Review the result yourself** — you're a full agent in the repo: read the diff or the
-   produced deliverables, run the contract's verify commands (tests/build).
-3. **Judge against the contract** — is the target met? Weigh any `stop` conditions in your
-   verdict (they're advisory context, not automatic). A tripped `hold` condition → ask the
-   user in this chat before proceeding.
-4. **Verdict — one of two calls:**
-   - **Not done, more work** → `mission_plan_submit` with the next batch (a post-start
-     submit appends a fresh batch and counts as one iteration). If the engine rejects it
-     with an iteration-cap / budget / deadline error, stop: review-submit instead.
-   - **Done, or must stop** → `mission_review_submit({summary, target_met})` — stamps the
-     review and finalizes the mission.
-
-The iteration cap, budget, and deadline are engine-enforced on the append path — you never
-police them yourself, but **be honest in `summary`** when stopping at a cap with the target
-unmet. After finalizing, give the completion digest: per-task one-liners, files changed,
-anything blocked or deferred, and concrete next steps (run tests, commit, follow-up mission).
+- Relay 🔍/⚡ digest lines in 1-2 lines as they land: `🔍 review-1 started`, check
+  progress (`✓ build`, `check FAILED: lint`), then the ⚡ verdict line.
+- **satisfied** → the engine advances (or finalizes when it's the last batch). Relay.
+- **needs work** → depends on `review_autonomy` and the proposal's scope:
+  - `auto` + mechanical fix → the engine applies the follow-up batch itself; relay the
+    "applied automatically" line.
+  - `gated` (default), judgment calls, or no concrete proposal → a ⚡ `review_followup`
+    attention item parks the mission. `attention_list`, present the proposals (changes,
+    scope, rationale) to the user, then `attention_resolve`: **allow** (apply the
+    follow-ups) / **deny** (accept the batch as-is, decline them) / **answer** (your text
+    steers the reviewer and it re-reviews).
+- **stopped** → the reviewer halted the mission (a `stop` condition or a dead end); relay
+  its reasoning.
+- The reviewer is addressable like any task: `task_logs review-1` shows its stream;
+  `task_steer review-1 "also check rollback"` restarts its review turn with that guidance
+  (once its proposal is parked as an attention item, use `attention_resolve` with `answer`
+  instead); `task_interrupt review-1` aborts the turn (it retries later, or steer it).
+- `mission_plan_submit` post-start is for **user-directed extra work** — not a review
+  verdict. Iteration cap, budget, and deadline are engine-enforced on every append
+  (reviewer follow-ups included) — you never police them yourself.
+- `mission_review_submit({summary, target_met})` is a **manual override only** —
+  force-closes review when the user says "just mark it done" or the reviewer is stuck.
 
 A failed task (`✗`) is not the end: `task_logs` it, then `task_resume({taskId, message})`
-to retry with guidance, or replan around it in the next batch.
+to retry with guidance, or append a replan around it.
+
+After the engine finalizes, call **`mission_receipt({missionId})`** and give the closing
+digest from it: per-task one-liners, files changed, spend vs budget, the review trail,
+anything deferred, and concrete next steps (commit, follow-up mission).
 
 ## Recovery (restart / compaction)
 
@@ -239,16 +268,32 @@ normally keep running across session boundaries and mission_resume is rarely nee
 SessionStart reminder still says a mission is active but workers aren't live — a true daemon
 crash or a reboot — call **`mission_resume`**: the supervisor re-derives everything from disk
 and re-spawns the runnable frontier; parked questions stay parked. Then check
-**`mission_status`** immediately: a terminal batch you hadn't reviewed shows an explicit
-"⚡ review pending" line there (and a watcher's timeout prints the same backstop line) —
-pick the loop back up at §5 right away rather than waiting on a wake. After a compaction,
-the same reminder + `mission_status` re-anchor you. `attention_list` is the user's "what's
+**`mission_status`** immediately: it shows any batch under engine review or "⚡ reviewer
+proposals awaiting approval" (a watcher timeout prints the same backstop) — pick §5 back up
+right away rather than waiting on a wake. A mission showing **⏸ paused** resumes only via
+`mission_resume` — that's normal, not a crash. If the repo gate denies you but no mission
+is actually live (stale lockdown after a hard daemon kill), the gate ignores a dead
+daemon's state automatically; if a denial still looks wrong, run
+`medley-engine service status` or `mission_pause` to clear it. After a compaction, the
+reminder + `mission_status` re-anchor you. `attention_list` is the user's "what's
 pending?" recovery hatch at any time.
 
 ## Boundaries
 
-- Plan in THIS chat; never spawn your own subagents to do the mission's work — workers are
-  the execution layer, and they already inherit everything.
+- Plan in THIS chat; never spawn your own subagents or touch the repo yourself while the
+  mission runs — workers are the execution layer, and the lockdown gate enforces it
+  (Edit/Write, Task, and mutating Bash in the repo are denied; reads and read-only git pass).
+- Never review a batch yourself — no diff-reading, no test-running, no verdicts. The
+  engine's reviewer owns that; your job is relaying and resolving attention.
 - Don't poll in a loop — the watcher wakes you. One watcher at a time.
 - Be honest about failures and limits (rate limits surface as paused workers; they
   auto-resume when the window resets).
+
+Know which stop the user means:
+
+| user intent | call | what happens |
+|---|---|---|
+| "hold on / I need the repo" | `mission_pause` | workers wind down gracefully (sessions saved), lockdown lifts, mission holds — `mission_resume` continues |
+| pause one flaky task | `task_interrupt` | that task parks; `task_resume` restarts it with guidance |
+| "kill it" | `mission_stop` | cancels everything (cascades); a receipt is still written |
+| walk away | nothing — close the session | daemon + workers keep going; any later session picks the mission up via the SessionStart reminder |

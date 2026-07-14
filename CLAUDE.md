@@ -12,7 +12,7 @@ workflow in the engine repo uploads the compiled binaries to both.
 
 ## Hard rules
 
-- **Never commit engine source or the built bundle here.** No `electron/`, no `src/`, no
+- **Never commit engine source or the built bundle here.** No `engine/`, no `src/`, no
   `dist/medley-engine.cjs`. Only the plugin (skills, hooks, scripts, manifests) and repo docs.
   (The compiled binaries live on GitHub **Releases**, not in the git tree.)
 - **`plugin/engine/version` is release-managed** — a plain-text version the plugin downloads. The

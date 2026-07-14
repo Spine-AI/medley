@@ -23,6 +23,22 @@ if [ ! -e "$MARKER" ]; then
   fi
   touch "$MARKER" 2>/dev/null || true
 fi
+# One-time CLI offer: if the `medley-engine` command isn't on the user's PATH, offer (once) to add
+# a shell alias so the advanced CLI (`service dashboard --setup`, service start/stop/logs) is
+# reachable. Mirrors the statusline offer above — never auto-writes, single-shot via a marker.
+CLI_MARKER="${HOME}/.medley/cli-offered"
+if [ ! -e "$CLI_MARKER" ]; then
+  if ! command -v medley-engine >/dev/null 2>&1; then
+    cat <<'MEDLEY_CLI_OFFER'
+[medley] One-time setup offer: the `medley-engine` CLI (advanced — dashboard branding via `service dashboard --setup`, plus service start/stop/restart/logs) is not on the user's PATH. Only with the user's explicit yes, append this exact block to ~/.zshrc (create the file if it doesn't exist):
+# >>> medley cli >>>
+alias medley-engine='"$(cat ~/.medley/engine-path)"'
+# <<< medley cli <<<
+Then tell them to run `source ~/.zshrc` or open a new terminal. The alias re-reads ~/.medley/engine-path on each call, so it survives engine upgrades. To remove it later, delete that marked block from ~/.zshrc. If the user is on a non-zsh shell (bash/fish), show them the same alias for their own rc. If they decline, drop it — this offer never repeats.
+MEDLEY_CLI_OFFER
+  fi
+  touch "$CLI_MARKER" 2>/dev/null || true
+fi
 case "$ENGINE" in
   *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief 2>/dev/null ;;
   *)                exec "$ENGINE" status --brief 2>/dev/null ;;

@@ -122,6 +122,27 @@ Per node:
 **`mission_plan_submit({contractId, plan})`** validates (unique slugs, real deps, no
 cycles) and returns the routed model per task. Fix and resubmit on errors.
 
+### Recurring triggers (scheduled work)
+
+A task can run **on a schedule** instead of once. Set `schedule` on a node to make it a **recurring
+trigger**: that node plus everything that `dependsOn` it (its sub-chain) re-runs on the cadence.
+
+- `schedule: {cron, reviewMode, oneShot?}` on the trigger node.
+  - `cron` — 5-field expression in the **user's local time**. `"0 20 * * *"` = 8pm every day,
+    `"0 * * * *"` = hourly, `"0 9 * * 1"` = 9am every Monday.
+  - `reviewMode` — `unattended` (each run completes with no gate) or `review` (files a review ticket
+    per run for you to judge). Defaults to `review`.
+  - `oneShot: true` — run **once** at the next matching time, then stop ("do X at 8pm tonight").
+- It runs **once at mission start** (approving always produces work now), then again on each cron
+  tick. Trigger sub-chains must be **disjoint** — a node belongs to only one trigger.
+- **A worker never schedules itself.** You declare the schedule at plan time; the Medley engine owns
+  the clock and spawns a fresh worker (claude-code/codex/cursor) for each run — so scheduling is not
+  something a Cursor/Codex worker "sets up," it's a property of the plan.
+- **Persistence + caveat (say this to the user for any daily/scheduled ask):** on macOS, starting a
+  recurring trigger installs a login agent so runs keep firing after you close the session (remove
+  with `medley-engine service uninstall`). A run fires at its scheduled time only while the Mac is
+  **awake and logged in** — otherwise once on the next wake. There is no wake-from-sleep guarantee.
+
 ## 3. Approval gate — the user's "go"
 
 Show the plan as an **indented DAG in text** with each task's routed model, e.g.:
@@ -132,6 +153,10 @@ build-api        [standard → claude:sonnet-5]   owns: server/api/*
 ├─ fix-ci        [simple → codex:gpt-5.6-luna]  owns: .github/workflows/*   (terminal-native)
 └─ verify        [complex → claude:opus]        depends on: build-api, build-ui — runs tests, reviews the diff
 ```
+
+A scheduled node shows its cadence in the DAG (e.g. `⏰ Daily at 20:00 (review)`) — **call the
+schedule out explicitly** so the user is approving the *recurrence*, not just the one-time work, and
+mention the awake/logged-in caveat for anything recurring.
 
 One or two sentences on the split and the risks. Then **wait for the user's conversational
 go-ahead** ("go", "ship it", "looks good"). Adjust and resubmit if they redirect —

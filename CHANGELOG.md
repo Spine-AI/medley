@@ -3,6 +3,14 @@
 All notable changes to the Medley plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). The plugin version tracks the engine version it pins.
 
+## [0.4.7] — 2026-07-15
+
+Tracks engine v0.4.7 — no plugin-script change. Engine-side dashboard cleanup for the free
+OpenRouter tier: the topbar credit pill is removed (usage lives in Settings only), the
+Medley-free ↔ your-own-key switch is fixed (instant, with an Edit-key flow instead of an
+always-open input), the model picker is uncapped (full open-source catalog), and bringing your
+own key now unlocks the full OpenRouter catalog (closed models too). See the engine changelog.
+
 ## [0.4.6] — 2026-07-15
 
 ### Fixed

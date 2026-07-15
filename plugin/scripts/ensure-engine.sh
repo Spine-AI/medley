@@ -66,9 +66,16 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   rmdir "$LOCK_DIR" 2>/dev/null || true   # looks stale — reclaim and download ourselves
   mkdir "$LOCK_DIR" 2>/dev/null || true
 fi
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+# Status breadcrumb the statusline reads: mark the download in flight under a $HOME-reachable state
+# dir (the statusline context lacks ${CLAUDE_PLUGIN_DATA}, so it can't watch the download lock). The
+# EXIT trap clears it whether the download succeeds, fails, or the checksum is rejected.
+STATE_DIR="${MEDLEY_DATA_DIR:-$HOME/.medley/state}"
+UPDATE_FILE="${STATE_DIR}/update.json"
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true; rm -f "$UPDATE_FILE" 2>/dev/null || true' EXIT
 
 echo "medley: downloading engine ${VERSION} (${asset})…" >&2
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+printf '{"state":"downloading","version":"%s","since":%s}\n' "$VERSION" "$(( $(date +%s) * 1000 ))" > "$UPDATE_FILE" 2>/dev/null || true
 tmp="$(mktemp)"
 sums="$(mktemp)"
 cleanup() { rm -f "$tmp" "$sums"; }

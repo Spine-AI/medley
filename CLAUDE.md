@@ -44,6 +44,11 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
   `mcp-headers.sh` reuses. Not on the default path.
 - `~/.medley/engine-path` — written by `session-start.sh`/`ensure-engine.sh` so the **statusline**
   (wired via `settings.json`, where `${CLAUDE_PLUGIN_DATA}` is unset) can still find the engine.
+- `~/.medley/state/update.json` — a download breadcrumb `ensure-engine.sh` writes while fetching a
+  new engine (`{"state":"downloading","version","since"}`, epoch-ms; removed when the download
+  settles). `statusline.sh` reads it — and the engine daemon's `.rolling` roll marker (60s freshness)
+  — on a fast, engine-free path *before* delegating to `status --statusline`, so `/plugin update`
+  surfaces `medley ▸ ⟳ downloading engine v…` / `medley ▸ ⟳ updating engine…`.
 
 **`.mcp.json` is a DIRECT HTTP MCP server** (`type:"http"`, `url http://127.0.0.1:8730/mcp`) — Claude
 Code talks straight to the shared daemon's `/mcp`, so CC's native HTTP auto-reconnect rides out a

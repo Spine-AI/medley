@@ -35,13 +35,25 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
   (`engine.getmedley.ai/v<version>`) — falling back to this repo's GitHub Release —
   verifies the checksum, `chmod +x`, caches it. No-ops for workers
   (`MEDLEY_WORKER=1`) and the dev override. Fails soft (session still starts).
-- `scripts/run-engine.sh` — used by `.mcp.json`; resolves (downloading on demand) and execs the
-  engine (a `.cjs` dev build via `node`; a binary directly).
+- `scripts/mcp-headers.sh` — the `.mcp.json` **`headersHelper`** (see below). Emits the Bearer token
+  for the daemon's `/mcp` (read-or-create from the stable `<dataDir>/mcp-token`, shared with the
+  engine), nudges the daemon awake if the port isn't answering (cold-start bridge), and tags a worker
+  session with `X-Medley-Worker`. Prints one JSON header object; must stay fast (10s CC budget).
+- `scripts/run-engine.sh` — the **stdio fallback** transport (`run-engine.sh mcp` → the engine's
+  `mcp` proxy) for Claude Code older than the http/`headersHelper` baseline, and the binary resolver
+  `mcp-headers.sh` reuses. Not on the default path.
 - `~/.medley/engine-path` — written by `session-start.sh`/`ensure-engine.sh` so the **statusline**
   (wired via `settings.json`, where `${CLAUDE_PLUGIN_DATA}` is unset) can still find the engine.
 
-`.mcp.json` uses the canonical wrapped `{ "mcpServers": { … } }` form. The self-contained binary
-needs no `NODE_PATH` (only a dev `.cjs` run via `node` relies on ambient resolution).
+**`.mcp.json` is a DIRECT HTTP MCP server** (`type:"http"`, `url http://127.0.0.1:8730/mcp`) — Claude
+Code talks straight to the shared daemon's `/mcp`, so CC's native HTTP auto-reconnect rides out a
+daemon roll (engine auto-update) and the tools survive; the old per-session stdio proxy died on a
+roll and broke them. The repo rides a **static** `X-Medley-Repo-Raw: ${CLAUDE_PROJECT_DIR}` header
+(CC interpolates it; the `headersHelper` does NOT get `CLAUDE_PROJECT_DIR`); the token rides the
+`headersHelper`. Requires the loopback port reachable — a stale pf redirect from an old
+`service dashboard --setup --portless` breaks `127.0.0.1:8730`; clear it with
+`medley-engine service dashboard --teardown` (`doctor` flags this). To revert to stdio for an old CC,
+set `.mcp.json` back to `{ "command": "bash", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run-engine.sh","mcp"] }`.
 
 Because paths must not leave the plugin dir after caching, **never** reintroduce a `../dist`
 reference in a shipped file — always go through the resolver.
@@ -60,7 +72,7 @@ reference in a shipped file — always go through the resolver.
 ```
 .claude-plugin/marketplace.json   the "medley" marketplace (lists this plugin, source ./plugin)
 plugin/.claude-plugin/plugin.json manifest (identity metadata: name, version, author, license, …)
-plugin/.mcp.json                  wrapped mcpServers → scripts/run-engine.sh
+plugin/.mcp.json                  http MCP server → daemon /mcp (headersHelper: scripts/mcp-headers.sh)
 plugin/hooks/hooks.json           SessionStart/PreCompact → session-start.sh; PreToolUse gate
 plugin/scripts/                   {resolve,ensure,run}-engine.sh, session-start.sh, statusline.sh,
                                   edit-conflict-gate.py

@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "medley": {
-      "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/run-engine.sh", "mcp"]
+      "type": "http",
+      "url": "http://127.0.0.1:8730/mcp",
+      "headers": { "X-Medley-Repo-Raw": "${CLAUDE_PROJECT_DIR}" },
+      "headersHelper": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-headers.sh\""
     }
   }
 }

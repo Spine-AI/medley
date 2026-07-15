@@ -105,10 +105,22 @@ fi
 chmod +x "$tmp"
 mv "$tmp" "$BIN_PATH"
 rm -f "$sums"
+# Was this an UPGRADE (a different version already cached) vs a first install? Note it before pruning
+# so we can tell the user what happens next.
+had_old=""
+if [ -n "$(find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' ! -name "medley-engine-${VERSION}" -print -quit 2>/dev/null)" ]; then
+  had_old="1"
+fi
 # Prune superseded binaries — only the pinned version is ever run, and each is ~80MB, so old ones
 # (from prior /plugin updates) just pile up. Safe: macOS keeps a running binary's inode alive after
 # unlink, and stray old daemons are reaped by the engine on next boot. Fail-soft.
 find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' ! -name "medley-engine-${VERSION}" -delete 2>/dev/null || true
 mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$BIN_PATH" > "${HOME}/.medley/engine-path" 2>/dev/null
-echo "medley: engine ready." >&2
+if [ -n "$had_old" ]; then
+  # An upgrade: the shared daemon will roll to ${VERSION} when it next starts (the SessionStart
+  # pre-warm triggers it). Sessions reconnect their MCP tools automatically — no restart needed.
+  echo "medley: engine ${VERSION} installed — the background service will switch to it now; your Medley tools reconnect automatically." >&2
+else
+  echo "medley: engine ${VERSION} ready." >&2
+fi
 exit 0

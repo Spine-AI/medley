@@ -21,9 +21,31 @@ VERSION="$(tr -d ' \t\n\r' < "$VERSION_FILE")"
 
 BIN_DIR="${CLAUDE_PLUGIN_DATA}/bin"
 BIN_PATH="${BIN_DIR}/medley-engine-${VERSION}"
+
+# Portable "is $1 >= $2" for dotted x.y.z versions (macOS BSD sort has no -V, so compare field by
+# field, numeric, descending, and check the winner is $1). Prerelease suffixes sort lexically within
+# a field — acceptable for our stable release scheme.
+version_ge() {
+  [ "$1" = "$2" ] && return 0
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)" = "$1" ]
+}
+
+# Record the engine-path cache the statusline + resolver fall back to — but only ever ADVANCE it. A
+# stale older-pin session (a concurrent Claude Code window on a prior plugin cache) must not downgrade
+# the cache and point everything at an older engine.
+record_engine_path() {
+  local cache="${HOME}/.medley/engine-path" cur cur_ver
+  mkdir -p "${HOME}/.medley" 2>/dev/null || return 0
+  cur="$(cat "$cache" 2>/dev/null || true)"
+  cur_ver="${cur##*/medley-engine-}"
+  if [ -z "$cur" ] || [ "$cur_ver" = "$cur" ] || version_ge "$VERSION" "$cur_ver"; then
+    printf '%s\n' "$BIN_PATH" > "$cache" 2>/dev/null || true
+  fi
+}
+
 # Already cached for this version? Record the path (for the statusline) and we're done.
 if [ -x "$BIN_PATH" ]; then
-  mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$BIN_PATH" > "${HOME}/.medley/engine-path" 2>/dev/null
+  record_engine_path
   exit 0
 fi
 
@@ -58,7 +80,7 @@ LOCK_DIR="${BIN_DIR}/.downloading-${VERSION}.lock"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   for _ in $(seq 1 180); do   # ~90s: wait out the other process's download instead of double-fetching
     if [ -x "$BIN_PATH" ]; then
-      mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$BIN_PATH" > "${HOME}/.medley/engine-path" 2>/dev/null
+      record_engine_path
       exit 0
     fi
     sleep 0.5
@@ -118,11 +140,22 @@ had_old=""
 if [ -n "$(find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' ! -name "medley-engine-${VERSION}" -print -quit 2>/dev/null)" ]; then
   had_old="1"
 fi
-# Prune superseded binaries — only the pinned version is ever run, and each is ~80MB, so old ones
-# (from prior /plugin updates) just pile up. Safe: macOS keeps a running binary's inode alive after
-# unlink, and stray old daemons are reaped by the engine on next boot. Fail-soft.
-find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' ! -name "medley-engine-${VERSION}" -delete 2>/dev/null || true
-mkdir -p "${HOME}/.medley" 2>/dev/null && printf '%s\n' "$BIN_PATH" > "${HOME}/.medley/engine-path" 2>/dev/null
+# Prune superseded binaries — each is ~80MB, so old ones (from prior /plugin updates) pile up. KEEP
+# THE TWO NEWEST and prune older: the launchd plist hard-codes a versioned binary path, so deleting
+# the one it still points at — in the window before the daemon repoints the plist — would strand the
+# shared daemon; keeping the current pin + its predecessor closes that window. Only the NEWEST-pin
+# session prunes, so a stale older-pin session neither deletes a newer binary nor thrashes
+# re-downloading its own. BSD sort has no -V → sort the dotted version numerically by field. Fail-soft.
+newest="$(find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' 2>/dev/null \
+  | sed 's#.*/medley-engine-##' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)"
+if [ "$newest" = "$VERSION" ]; then
+  find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' 2>/dev/null \
+    | sed 's#.*/medley-engine-##' \
+    | sort -t. -k1,1nr -k2,2nr -k3,3nr \
+    | tail -n +3 \
+    | while IFS= read -r v; do rm -f "$BIN_DIR/medley-engine-$v" 2>/dev/null || true; done
+fi
+record_engine_path
 if [ -n "$had_old" ]; then
   # An upgrade: the shared daemon will roll to ${VERSION} when it next starts (the SessionStart
   # pre-warm triggers it). Sessions reconnect their MCP tools automatically — no restart needed.

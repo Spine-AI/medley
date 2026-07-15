@@ -18,6 +18,16 @@ STATE="${MEDLEY_DATA_DIR:-${HOME}/.medley/state}"
 TOKENFILE="${STATE}/mcp-token"
 PORT="${MEDLEY_DASHBOARD_PORT:-8730}"
 
+# The engine version THIS session's plugin is pinned to (release-managed). Sent as X-Medley-Engine-Pin
+# so the daemon can detect it's serving an older engine than this session expects and roll forward
+# (version handshake). CLAUDE_PLUGIN_ROOT is available to the helper; a version string is JSON-safe.
+# Guard with -f first (matches resolve-engine.sh) so a missing file can't leak a redirection error.
+PIN=""
+VERSION_FILE="${CLAUDE_PLUGIN_ROOT:-}/engine/version"
+[ -f "$VERSION_FILE" ] && PIN="$(tr -d ' \t\n\r' < "$VERSION_FILE" 2>/dev/null)"
+PIN_HDR=""
+[ -n "$PIN" ] && PIN_HDR=",\"X-Medley-Engine-Pin\":\"${PIN}\""
+
 read_token() { tr -d ' \t\n\r' < "$TOKENFILE" 2>/dev/null; }
 is_token() { printf '%s' "$1" | grep -qE '^[0-9a-f]{32}$'; }
 
@@ -41,7 +51,7 @@ fi
 # session connects here too. It sends X-Medley-Worker so the daemon binds the no-op stub, never the
 # orchestrator (deniedTools is the independent layer 2). The worker's daemon is already up — no nudge.
 if [ "${MEDLEY_WORKER:-}" = "1" ]; then
-  printf '{"Authorization":"Bearer %s","X-Medley-Worker":"1"}\n' "$TOKEN"
+  printf '{"Authorization":"Bearer %s","X-Medley-Worker":"1"%s}\n' "$TOKEN" "$PIN_HDR"
   exit 0
 fi
 
@@ -59,4 +69,4 @@ if ! curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
   fi
 fi
 
-printf '{"Authorization":"Bearer %s"}\n' "$TOKEN"
+printf '{"Authorization":"Bearer %s"%s}\n' "$TOKEN" "$PIN_HDR"

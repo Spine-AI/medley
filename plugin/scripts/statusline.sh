@@ -23,6 +23,12 @@ try:
     if u.get("state") == "downloading" and now - float(u.get("since", 0)) < 1_800_000:
         v = u.get("version", "")
         line = "medley ▸ ⟳ downloading engine" + ((" v" + v) if v else "") + "…"
+    elif u.get("state") == "pending":
+        # A newer engine is installed but the roll is DEFERRED until the daemon goes idle (the engine
+        # writes this + clears it on roll). No freshness bound: a deferred upgrade can legitimately
+        # wait hours (e.g. a worker sleeping on a wakeup) before it applies.
+        v = u.get("version", "")
+        line = "medley ▸ ⟳ update" + ((" v" + v) if v else "") + " pending"
 except Exception:
     pass
 # version roll — 60s freshness (matches roll-marker.ts FRESH_MS)

@@ -39,7 +39,13 @@ record_engine_path() {
   cur="$(cat "$cache" 2>/dev/null || true)"
   cur_ver="${cur##*/medley-engine-}"
   if [ -z "$cur" ] || [ "$cur_ver" = "$cur" ] || version_ge "$VERSION" "$cur_ver"; then
-    printf '%s\n' "$BIN_PATH" > "$cache" 2>/dev/null || true
+    # Atomic write (tmp + mv): the launchd trampoline (~/.medley/bin/medley-daemon) reads this file to
+    # decide which binary to exec, so a torn/partial read would strand the daemon (exit 78). A rename
+    # is atomic on the same filesystem, so the trampoline only ever sees the old or the new path whole.
+    local tmp="${cache}.tmp.$$"
+    if printf '%s\n' "$BIN_PATH" > "$tmp" 2>/dev/null; then
+      mv -f "$tmp" "$cache" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
+    fi
   fi
 }
 

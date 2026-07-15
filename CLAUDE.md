@@ -33,8 +33,10 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
   → asset (`medley-engine-darwin-arm64` — Apple Silicon only; x86_64 fails soft with a
   "requires arm64 / relaunch out of Rosetta" message), `curl`s it + `SHA256SUMS` from the R2 CDN
   (`engine.getmedley.ai/v<version>`) — falling back to this repo's GitHub Release —
-  verifies the checksum, `chmod +x`, caches it. No-ops for workers
-  (`MEDLEY_WORKER=1`) and the dev override. Fails soft (session still starts).
+  verifies the checksum, `chmod +x`, caches it. Advances the `~/.medley/engine-path` cache
+  (`record_engine_path` — monotonic, never downgrades) and keeps the two newest binaries, pruning
+  older ones (the engine deletes the rest down to one after it rolls — see engine `runDaemon`). No-ops
+  for workers (`MEDLEY_WORKER=1`) and the dev override. Fails soft (session still starts).
 - `scripts/mcp-headers.sh` — the `.mcp.json` **`headersHelper`** (see below). Emits the Bearer token
   for the daemon's `/mcp` (read-or-create from the stable `<dataDir>/mcp-token`, shared with the
   engine), nudges the daemon awake if the port isn't answering (cold-start bridge), and tags a worker
@@ -42,8 +44,12 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
 - `scripts/run-engine.sh` — the **stdio fallback** transport (`run-engine.sh mcp` → the engine's
   `mcp` proxy) for Claude Code older than the http/`headersHelper` baseline, and the binary resolver
   `mcp-headers.sh` reuses. Not on the default path.
-- `~/.medley/engine-path` — written by `session-start.sh`/`ensure-engine.sh` so the **statusline**
-  (wired via `settings.json`, where `${CLAUDE_PLUGIN_DATA}` is unset) can still find the engine.
+- `~/.medley/engine-path` — written ONLY by `ensure-engine.sh` (`record_engine_path`, which only ever
+  ADVANCES it — so a stale older-pin session, e.g. a concurrent Claude Code window on a prior plugin
+  cache, cannot downgrade the cache) so the **statusline** (wired via `settings.json`, where
+  `${CLAUDE_PLUGIN_DATA}` is unset) can still find the engine. `session-start.sh` deliberately does
+  NOT write it: a second, unguarded writer defeated the no-downgrade guard (that was the "engine-path
+  stuck on an old version after `/plugin update`" bug).
 - `~/.medley/state/update.json` — a download breadcrumb `ensure-engine.sh` writes while fetching a
   new engine (`{"state":"downloading","version","since"}`, epoch-ms; removed when the download
   settles). `statusline.sh` reads it — and the engine daemon's `.rolling` roll marker (60s freshness)

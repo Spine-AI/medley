@@ -53,7 +53,8 @@ Engine updates are shipped by bumping the plugin. Refresh and update:
 ```
 
 The next session detects the new pinned engine version and downloads it automatically; the running
-engine daemon rolls itself to the new version on next use.
+engine daemon rolls itself forward to the new version on next use (only ever forward, never back to an
+older one), then prunes the superseded binaries so only the current engine remains.
 
 ## Develop (this plugin)
 

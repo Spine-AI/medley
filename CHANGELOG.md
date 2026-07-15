@@ -3,6 +3,24 @@
 All notable changes to the Medley plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). The plugin version tracks the engine version it pins.
 
+## [0.4.6] — 2026-07-15
+
+### Fixed
+- **`~/.medley/engine-path` could get stuck on an older engine after `/plugin update`.**
+  `session-start.sh` was a second, unguarded writer of the cache; it overrode `ensure-engine.sh`'s
+  advance-only guard, so a stale older-pin session (a concurrent Claude Code window still on a prior
+  plugin cache) stamped the pointer — and, via the daemon prewarm, the shared daemon itself — back to
+  an older version. `ensure-engine.sh` (`record_engine_path`) is now the sole, monotonic writer.
+- Pairs with engine v0.4.6, which refuses to roll the shared daemon to an older version and prunes
+  superseded engine binaries down to a single one (see the engine changelog for engine-side detail).
+
+## [0.4.1] – [0.4.5] — 2026-07-15
+
+Plugin releases tracking engine v0.4.1–v0.4.5; the engine-side changes (daemon/launchd boot fixes, the
+crash-loop self-heal, and the free OpenRouter tier) are documented in the engine changelog. The one
+notable plugin-script change in this range shipped in v0.4.4: `ensure-engine.sh` gained the
+keep-two-newest binary prune and the advance-only `record_engine_path` engine-path cache.
+
 ## [0.4.0] — 2026-07-14
 
 ### Changed

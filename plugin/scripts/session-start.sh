@@ -9,10 +9,12 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$DIR/ensure-engine.sh" 2>/dev/null || true
 ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
 [ -n "$ENGINE" ] || exit 0
-# Cache the resolved path for contexts that lack the plugin env (e.g. the statusline command).
-if mkdir -p "${HOME}/.medley" 2>/dev/null; then
-  printf '%s\n' "$ENGINE" > "${HOME}/.medley/engine-path" 2>/dev/null || true
-fi
+# ~/.medley/engine-path (the cache the statusline + resolver fall back to when the plugin env is
+# unset) is written ONLY by ensure-engine.sh:record_engine_path, which advances it monotonically —
+# so a stale older-pin session can never downgrade it. We do NOT rewrite it here: a second,
+# unguarded writer defeats that guard and lets an older session drag the pointer (and, via the
+# prewarm below, the daemon) backward. Just ensure the dir exists for the marker files further down.
+mkdir -p "${HOME}/.medley" 2>/dev/null || true
 # Pre-warm the shared daemon out-of-band so it's already up (or already warming) by the time the MCP
 # server (.mcp.json → run-engine.sh mcp) attaches. Otherwise a cold session pays the daemon boot +
 # health poll INSIDE Claude Code's MCP init window and tools can fail to register on session 1.

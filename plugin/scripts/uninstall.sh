@@ -77,9 +77,18 @@ bootout()         { launchctl bootout "gui/${uid}/$1" >/dev/null 2>&1 || true; }
 
 rm_path() { # $1 = path; refuses empty / "/" / "$HOME"
   local p="$1"
-  [ -n "$p" ] && [ "$p" != "/" ] && [ "$p" != "$HOME" ] || { note "refusing to remove unsafe path '$p'"; return 0; }
+  if [ -z "$p" ] || [ "$p" = "/" ] || [ "$p" = "$HOME" ]; then
+    note "refusing to remove unsafe path '$p'"
+    return 0
+  fi
   [ -e "$p" ] || return 0
-  if [ "$DRY_RUN" = 1 ]; then act "rm -rf $p"; else rm -rf "$p" && note "removed $p" || note "could not remove $p"; fi
+  if [ "$DRY_RUN" = 1 ]; then
+    act "rm -rf $p"
+  elif rm -rf "$p"; then
+    note "removed $p"
+  else
+    note "could not remove $p"
+  fi
 }
 
 # ── resolve the engine binary (for a graceful stop only; everything else we do ourselves) ──────────

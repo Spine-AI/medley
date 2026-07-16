@@ -166,6 +166,15 @@ Always write `planning_notes`: a short handoff summary of the interview — what
 user discussed, decisions made, why the plan is shaped this way. It's injected into every
 reviewer prompt and is the reviewer's **only window into this conversation**.
 
+### Another mission already running in this repo
+
+Missions can run **in parallel in one repo**. When another mission is already running, the
+engine's `contract_set`/`mission_start` responses include a one-line note saying so —
+**relay the note to the user and proceed.** Do NOT invent a conflict prompt or refuse;
+missions share the working tree, and keeping file scopes disjoint across missions is the
+user's responsibility (until worktrees exist). If the overlap looks risky, say so in one
+line — then continue.
+
 ### Recurring triggers (scheduled work)
 
 A task can run **on a schedule** instead of once. Set `schedule` on a node to make it a **recurring
@@ -255,9 +264,12 @@ path, MCP write) or asked a question and is **parked** until resolved:
   the worker unparks instantly. `allow_always` persists a durable grant for MCP tools
   (all current and future workers); for Bash/file approvals it covers that worker's session.
 
-**Repo lockdown**: while the mission runs, the repo is **read-only for this session** —
-a gate denies your Edit/Write, subagents (Task), and mutating Bash inside the repo; reads,
-Grep/Glob, and read-only git pass, and everything outside the repo is untouched. The
+**Session lockdown**: while the mission runs, the repo is **read-only for the supervising
+session(s) only** — this session, because it started (or resumed) the mission. A gate
+denies your Edit/Write, subagents (Task), and mutating Bash inside the repo; reads,
+Grep/Glob, and read-only git pass, and everything outside the repo is untouched. **Other
+sessions in this repo stay free**: they can edit, run commands, and start their own
+missions — they just get a one-time heads-up that workers may edit files under them. The
 conversation stays fully usable — chat, plan, answer questions, work elsewhere. To change
 the repo, go **through the mission**: `task_steer` (redirect a worker),
 `mission_plan_change` (add a task), or `mission_pause` (winds workers down gracefully
@@ -318,18 +330,24 @@ and re-spawns the runnable frontier; parked questions stay parked. Then check
 **`mission_status`** immediately: it shows any batch under engine review or "⚡ reviewer
 proposals awaiting approval" (a watcher timeout prints the same backstop) — pick §5 back up
 right away rather than waiting on a wake. A mission showing **⏸ paused** resumes only via
-`mission_resume` — that's normal, not a crash. If the repo gate denies you but no mission
-is actually live (stale lockdown after a hard daemon kill), the gate ignores a dead
-daemon's state automatically; if a denial still looks wrong, run
-`medley-engine service status` or `mission_pause` to clear it. After a compaction, the
+`mission_resume` — that's normal, not a crash. The gate's facts live on disk: the engine
+writes `<repo>/.medley/mission-state.json` (its `missions[]` lists every active/paused
+mission here), and a hook binds this session to the missions it supervises via
+`<repo>/.medley/host-sessions/<session_id>.json`. The gate **fails open** — it locks only
+a session positively bound to a still-live mission; a dead daemon's state, a stale or
+missing binding, or a reopened conversation degrades to a one-time warning, never a
+repo-wide lock. If a denial still looks wrong, run `medley-engine service status` or
+`mission_pause` to clear it. After a compaction, the
 reminder + `mission_status` re-anchor you. `attention_list` is the user's "what's
 pending?" recovery hatch at any time.
 
 ## Boundaries
 
 - Plan in THIS chat; never spawn your own subagents or touch the repo yourself while the
-  mission runs — workers are the execution layer, and the lockdown gate enforces it
-  (Edit/Write, Task, and mutating Bash in the repo are denied; reads and read-only git pass).
+  mission runs — workers are the execution layer, and the session lockdown gate enforces it
+  for this supervising session (Edit/Write, Task, and mutating Bash in the repo are denied;
+  reads and read-only git pass). Other sessions are not your concern — the gate leaves
+  them free.
 - Never review a batch yourself — no diff-reading, no test-running, no verdicts. The
   engine's reviewer owns that; your job is relaying and resolving attention.
 - Don't poll in a loop — the watcher wakes you. One watcher at a time.

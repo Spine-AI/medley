@@ -14,8 +14,8 @@ import unittest
 GATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "edit-conflict-gate.py")
 
 
-def run_gate(payload, env_extra=None, tmpdir=None):
-    """Run the gate; return (exit_code, parsed_decision_or_None)."""
+def run_gate_full(payload, env_extra=None, tmpdir=None):
+    """Run the gate; return (exit_code, decision_or_None, reason_or_None)."""
     env = {k: v for k, v in os.environ.items() if k != "MEDLEY_WORKER"}
     if tmpdir:
         env["TMPDIR"] = tmpdir  # keep warn-once markers out of the real temp dir
@@ -28,10 +28,18 @@ def run_gate(payload, env_extra=None, tmpdir=None):
         text=True,
         env=env,
     )
-    decision = None
+    decision, reason = None, None
     if proc.stdout.strip():
-        decision = json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"]
-    return proc.returncode, decision
+        out = json.loads(proc.stdout)["hookSpecificOutput"]
+        decision = out["permissionDecision"]
+        reason = out.get("permissionDecisionReason")
+    return proc.returncode, decision, reason
+
+
+def run_gate(payload, env_extra=None, tmpdir=None):
+    """Run the gate; return (exit_code, parsed_decision_or_None)."""
+    code, decision, _reason = run_gate_full(payload, env_extra, tmpdir)
+    return code, decision
 
 
 class GateTestCase(unittest.TestCase):
@@ -41,7 +49,10 @@ class GateTestCase(unittest.TestCase):
         os.makedirs(os.path.join(self.repo, ".medley"))
         self.addCleanup(self._tmp.cleanup)
 
-    def write_state(self, lockdown=True, pid=None, title="Ship the widget", engine=None):
+    def write_state(self, lockdown=True, pid=None, title="Ship the widget", engine=None,
+                    missions="auto"):
+        """missions="auto" → v2 file listing the legacy mission; missions=None → old-engine
+        file WITHOUT the missions key; else the given list goes in verbatim."""
         state = {
             "updatedAt": 1234567890000,
             "lockdown": lockdown,
@@ -52,8 +63,18 @@ class GateTestCase(unittest.TestCase):
         }
         if engine is not None:
             state["engine"] = engine
+        if missions == "auto":
+            missions = [{"id": "m1", "title": title, "status": "running"}]
+        if missions is not None:
+            state["missions"] = missions
         with open(os.path.join(self.repo, ".medley", "mission-state.json"), "w") as f:
             json.dump(state, f)
+
+    def write_session_binding(self, session_id, missions):
+        d = os.path.join(self.repo, ".medley", "host-sessions")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, session_id + ".json"), "w") as f:
+            json.dump({"missions": missions, "updatedAt": 1234567890}, f)
 
     def payload(self, tool_name, tool_input):
         return {
@@ -123,9 +144,13 @@ class TestBypassAndFallthrough(GateTestCase):
 
 
 class TestLockdownDenials(GateTestCase):
+    """SUPERVISING session: this session's binding names the live mission, so the full
+    legacy lockdown behavior applies — these assertions pin the golden-matrix column."""
+
     def setUp(self):
         super().setUp()
         self.write_state(lockdown=True)
+        self.write_session_binding("test-session", ["m1"])
 
     def deny_reason(self, tool, tool_input):
         payload = self.payload(tool, tool_input)
@@ -264,6 +289,7 @@ class TestEngineBinaryCarveOut(GateTestCase):
 
     def setUp(self):
         super().setUp()
+        self.write_session_binding("test-session", ["m1"])  # supervising session
         self.bindir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.bindir, ignore_errors=True)
         self.engine = os.path.join(self.bindir, "medley-engine")
@@ -353,6 +379,184 @@ class TestEngineBinaryCarveOut(GateTestCase):
         # Old daemon writing no engine field → today's conservative behavior.
         self.write_state()
         self.assert_bash(f'"{self.engine}" watch', expect_allow=False)
+
+
+class TestSessionScopedGoldenMatrix(GateTestCase):
+    """Golden matrix for the session-scoped gate. Columns: supervising / non-supervising /
+    no-binding-dir / old-engine-no-missions-key. The SUPERVISING column must equal today's
+    lockdown behavior verbatim; every other column is FAIL-OPEN: one informational deny per
+    session on the first would-be-gated call, then everything falls through to the per-file
+    active-work gate — NEVER a repeating repo-wide deny."""
+
+    SESSION = "matrix-session"
+
+    def setUp(self):
+        super().setUp()
+        # Markers/temp dir OUTSIDE the repo: TMPDIR points here so warn-once markers and
+        # the "Write to $TMPDIR" row are genuinely outside the repo tree.
+        self._scratch = tempfile.TemporaryDirectory()
+        self.scratch = os.path.realpath(self._scratch.name)
+        self.addCleanup(self._scratch.cleanup)
+        self.bindir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.bindir, ignore_errors=True)
+        self.engine = os.path.join(self.bindir, "medley-engine")
+        with open(self.engine, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(self.engine, 0o755)
+
+    def gate3(self, tool, tool_input):
+        payload = self.payload(tool, tool_input)
+        payload["session_id"] = self.SESSION
+        return run_gate_full(payload, tmpdir=self.scratch)
+
+    def rows(self):
+        return [
+            ("task", "Task", {"prompt": "go implement it"}),
+            ("edit_in_repo", "Edit", {"file_path": os.path.join(self.repo, "src", "a.py")}),
+            ("edit_outside", "Edit", {"file_path": os.path.join(self.scratch, "plan.md")}),
+            ("write_tmpdir", "Write", {"file_path": os.path.join(self.scratch, "notes.txt")}),
+            ("git_status", "Bash", {"command": "git status"}),
+            ("git_commit", "Bash", {"command": "git commit -m x"}),
+            ("rm_rf", "Bash", {"command": "rm -rf src"}),
+            ("engine_watch", "Bash", {"command": f'"{self.engine}" watch'}),
+            ("service_logs", "Bash", {"command": f'"{self.engine}" service logs'}),
+        ]
+
+    GATED_ROWS = ("task", "edit_in_repo", "git_commit", "rm_rf")
+    UNGATED_ROWS = ("edit_outside", "write_tmpdir", "git_status", "engine_watch",
+                    "service_logs")
+
+    def test_supervising_column_is_legacy_lockdown_verbatim(self):
+        self.write_state(engine={"execPath": self.engine})
+        self.write_session_binding(self.SESSION, ["m1"])
+        rows = dict((n, (t, ti)) for n, t, ti in self.rows())
+        for name in self.UNGATED_ROWS:
+            tool, ti = rows[name]
+            for attempt in (1, 2):
+                code, decision, _ = self.gate3(tool, ti)
+                self.assertEqual((code, decision), (0, None),
+                                 f"supervising should ALLOW {name} (attempt {attempt})")
+        for name in self.GATED_ROWS:
+            tool, ti = rows[name]
+            for attempt in (1, 2):  # denials REPEAT — no warn-once while supervising
+                code, decision, reason = self.gate3(tool, ti)
+                self.assertEqual((code, decision), (0, "deny"),
+                                 f"supervising should DENY {name} (attempt {attempt})")
+                self.assertIn("Ship the widget", reason)
+                self.assertIn("mission_pause", reason)
+
+    def assert_fail_open_column(self, column):
+        rows = dict((n, (t, ti)) for n, t, ti in self.rows())
+        # Ungated rows never trigger the coexist warning.
+        for name in self.UNGATED_ROWS:
+            tool, ti = rows[name]
+            for attempt in (1, 2):
+                code, decision, _ = self.gate3(tool, ti)
+                self.assertEqual((code, decision), (0, None),
+                                 f"[{column}] {name} must be allowed (attempt {attempt})")
+        # First would-be-gated call: exactly ONE informational deny…
+        tool, ti = rows["git_commit"]
+        code, decision, reason = self.gate3(tool, ti)
+        self.assertEqual((code, decision), (0, "deny"),
+                         f"[{column}] first gated call should warn once")
+        self.assertIn("Ship the widget", reason)
+        self.assertNotIn("STOP", reason, f"[{column}] warn must be informational, not a STOP")
+        # …then EVERY gated row passes, repeatedly — never a repeating repo-wide deny.
+        for name in self.GATED_ROWS:
+            tool, ti = rows[name]
+            for attempt in (1, 2):
+                code, decision, _ = self.gate3(tool, ti)
+                self.assertEqual((code, decision), (0, None),
+                                 f"[{column}] {name} must pass after the warn "
+                                 f"(attempt {attempt})")
+
+    def test_non_supervising_column_fails_open(self):
+        self.write_state(engine={"execPath": self.engine})
+        # This session's binding exists but names a DIFFERENT mission.
+        self.write_session_binding(self.SESSION, ["zzz-other-mission"])
+        self.assert_fail_open_column("non-supervising")
+
+    def test_no_binding_dir_column_fails_open(self):
+        # Binder broken or pre-update session: .medley/host-sessions/ absent entirely.
+        self.write_state(engine={"execPath": self.engine})
+        self.assert_fail_open_column("no-binding-dir")
+
+    def test_old_engine_no_missions_key_column_fails_open(self):
+        # Version skew: new plugin + old engine (no missions[] key) must NEVER repo-wide
+        # lock — even a session that IS bound degrades to the warn-once.
+        self.write_state(engine={"execPath": self.engine}, missions=None)
+        self.write_session_binding(self.SESSION, ["m1"])
+        self.assert_fail_open_column("old-engine")
+
+    def test_unreadable_binding_fails_open(self):
+        self.write_state(engine={"execPath": self.engine})
+        d = os.path.join(self.repo, ".medley", "host-sessions")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, self.SESSION + ".json"), "w") as f:
+            f.write("{not json")
+        self.assert_fail_open_column("corrupt-binding")
+
+    def test_supervising_deny_names_supervised_title_not_newest(self):
+        # Two live missions; legacy fields point at the NEWEST (m2) but this session
+        # supervises only m1 — the deny must name m1's title.
+        self.write_state(
+            title="Newer Mission",
+            missions=[
+                {"id": "m2", "title": "Newer Mission", "status": "running"},
+                {"id": "m1", "title": "Older Mission", "status": "running"},
+            ],
+        )
+        # legacy mission field carries m2 (write_state uses `title` for it)
+        self.write_session_binding(self.SESSION, ["m1"])
+        code, decision, reason = self.gate3("Task", {"prompt": "go"})
+        self.assertEqual((code, decision), (0, "deny"))
+        self.assertIn("Older Mission", reason)
+        self.assertNotIn("Newer Mission", reason)
+
+    def test_wildcard_binding_supervises_all(self):
+        self.write_state()
+        self.write_session_binding(self.SESSION, ["*"])
+        for attempt in (1, 2):  # repeats: real lockdown, not the warn-once
+            code, decision, reason = self.gate3("Task", {"prompt": "go"})
+            self.assertEqual((code, decision), (0, "deny"))
+            self.assertIn("Ship the widget", reason)
+            self.assertIn("mission_pause", reason)
+
+    def test_paused_binding_is_not_supervising(self):
+        # Session bound to a PAUSED mission while another runs: not supervising → fail-open.
+        self.write_state(
+            missions=[
+                {"id": "m2", "title": "Ship the widget", "status": "running"},
+                {"id": "m1", "title": "Paused One", "status": "paused"},
+            ],
+        )
+        self.write_session_binding(self.SESSION, ["m1"])
+        code, decision, _ = self.gate3("Bash", {"command": "git commit -m x"})
+        self.assertEqual((code, decision), (0, "deny"))  # warn-once
+        code, decision, _ = self.gate3("Bash", {"command": "git commit -m x"})
+        self.assertEqual((code, decision), (0, None))
+
+    def test_fail_open_still_per_file_gated_by_active_work(self):
+        # After the coexist warn, in-repo edits still hit the per-file active-work gate.
+        self.write_state()
+        work = {"tasks": [{"taskId": "t1", "title": "Task One", "mission": "M",
+                           "files": ["src/a.py"]}]}
+        with open(os.path.join(self.repo, ".medley", "active-work.json"), "w") as f:
+            json.dump(work, f)
+        # Consume the coexist warn with a Task call.
+        code, decision, _ = self.gate3("Task", {"prompt": "go"})
+        self.assertEqual((code, decision), (0, "deny"))
+        owned = os.path.join(self.repo, "src", "a.py")
+        free = os.path.join(self.repo, "src", "b.py")
+        # Unowned file: allowed immediately.
+        code, decision, _ = self.gate3("Edit", {"file_path": free})
+        self.assertEqual((code, decision), (0, None))
+        # Owned file: per-file warn-once deny, then allowed.
+        code, decision, reason = self.gate3("Edit", {"file_path": owned})
+        self.assertEqual((code, decision), (0, "deny"))
+        self.assertIn("Task One", reason)
+        code, decision, _ = self.gate3("Edit", {"file_path": owned})
+        self.assertEqual((code, decision), (0, None))
 
 
 if __name__ == "__main__":

@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 # PreToolUse gate (Edit|Write|MultiEdit|NotebookEdit|Task|Bash) with two modes:
 #
-# 1. LOCKDOWN — while an orchestrated Medley mission is live, the daemon writes
-#    .medley/mission-state.json with {"lockdown": true, ...}. The repo becomes read-only
-#    for the HOST session: subagents (Task) are denied, edits inside the repo are denied,
-#    and Bash is allowed only when every command segment is read-only. Every denial
-#    repeats (no warn-once) and names the escape hatch: mission_pause.
-# 2. Otherwise (no state file / lockdown:false / stale daemon pid) — the original
-#    per-file behavior: warn ONCE before the host edits a file a running worker owns
-#    (from .medley/active-work.json); the same edit goes through on retry.
+# 1. SESSION-SCOPED LOCKDOWN — while an orchestrated Medley mission is live, the daemon
+#    writes .medley/mission-state.json with {"lockdown": true, "missions": [...], ...} and
+#    the session-mission-binder records which missions THIS session supervises
+#    (.medley/host-sessions/<session_id>.json). Only a SUPERVISING session gets the full
+#    lockdown: subagents (Task) denied, edits inside the repo denied, Bash allowed only
+#    when every command segment is read-only; every denial repeats and names the escape
+#    hatch (mission_pause). Every OTHER session FAILS OPEN: one informational deny per
+#    session on its first would-be-gated call ("a mission is running here"), then it falls
+#    through to the per-file gate below. Missing/unreadable bindings, a broken binder, or
+#    an old engine without missions[] all degrade to that warn-once — the ONLY deny state
+#    is a positively-confirmed supervising session.
+# 2. Otherwise (no state file / lockdown:false / stale daemon pid / non-supervising after
+#    the warn) — the original per-file behavior: warn ONCE before the host edits a file a
+#    running worker owns (from .medley/active-work.json); the same edit goes through on
+#    retry.
 #
 # Stdlib only, fast, never invokes the engine. No JSON output = allow.
 import sys, json, os, hashlib, pathlib, re, shlex, shutil
@@ -269,13 +276,65 @@ def command_is_readonly(cmd: str, engine=None) -> bool:
     return all(segment_is_readonly(s, engine) for s in segments)
 
 
-state = load_lockdown_state(project)
-if state is not None:
-    mission = state.get("mission") or {}
-    title = mission.get("title") or "unknown mission"
+# Mission statuses in which live workers may be changing files (mirrors the engine's
+# ACTIVE_MISSION_STATUSES). 'paused' is deliberately NOT here: a paused mission has no
+# live workers and its supervisor is free to edit until mission_resume.
+ACTIVE_MISSION_STATUSES = {"launching", "running", "needs_attention", "automating"}
+
+
+def active_missions(state):
+    """missions[] entries with a live status. None → the v2 key is absent or malformed
+    (old engine / version skew) — callers must FAIL OPEN, never repo-wide lock."""
+    listed = state.get("missions")
+    if not isinstance(listed, list):
+        return None
+    return [
+        m
+        for m in listed
+        if isinstance(m, dict)
+        and isinstance(m.get("id"), str)
+        and m.get("status") in ACTIVE_MISSION_STATUSES
+    ]
+
+
+def session_supervised(active, session_id):
+    """The subset of live missions THIS session supervises, positively confirmed via its
+    host-sessions binding file ("*" = supervises all). Anything missing, unreadable, or
+    non-intersecting → None (fail open)."""
+    if not active or not isinstance(session_id, str) or not session_id:
+        return None
+    if "/" in session_id or os.sep in session_id or session_id in (".", ".."):
+        return None  # path-unsafe id — the binder never writes these
+    path = os.path.join(project, ".medley", "host-sessions", session_id + ".json")
+    try:
+        with open(path) as f:
+            binding = json.load(f)
+    except Exception:
+        return None
+    recorded = binding.get("missions") if isinstance(binding, dict) else None
+    if not isinstance(recorded, list):
+        return None
+    recorded = {x for x in recorded if isinstance(x, str)}
+    if "*" in recorded:
+        return active
+    hit = [m for m in active if m["id"] in recorded]
+    return hit or None
+
+
+def mission_phrase(missions):
+    titles = ", ".join(f'"{(m or {}).get("title") or "unknown mission"}"' for m in missions)
+    verb = "is" if len(missions) == 1 else "are"
+    plural = "" if len(missions) == 1 else "s"
+    return f"Medley mission{plural} {titles} {verb} running"
+
+
+def lockdown_deny_reason(state, missions):
+    """Today's lockdown rules, verbatim: the deny reason for this tool call under a live
+    mission, or None when the call is allowed (read-only / outside the repo)."""
+    phrase = mission_phrase(missions)
     if tool_name == "Task":
-        deny(
-            f'STOP: Medley mission "{title}" is running — workers are the execution '
+        return (
+            f"STOP: {phrase} — workers are the execution "
             "layer; the host session must not spawn subagents for mission work. Use "
             "task_steer to redirect a worker or mission_plan_submit to add tasks; "
             "mission_pause reclaims the repo for direct work."
@@ -283,29 +342,66 @@ if state is not None:
     if tool_name in EDIT_TOOLS:
         file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         if not file_path:
-            sys.exit(0)
+            return None
         root = os.path.realpath(project)
         target = os.path.realpath(os.path.join(project, file_path))
         if target == root or target.startswith(root + os.sep):
-            deny(
-                f'STOP: Medley mission "{title}" is running — the repo is read-only '
+            return (
+                f"STOP: {phrase} — the repo is read-only "
                 "for the host session while workers execute. Use task_steer to "
                 "redirect a worker, mission_plan_submit to add tasks, or "
                 "mission_pause to reclaim the repo; mission_stop cancels the mission."
             )
-        sys.exit(0)  # outside the repo (scratchpads, ~/.claude plans) → allow
+        return None  # outside the repo (scratchpads, ~/.claude plans) → allow
     if tool_name == "Bash":
         cmd = tool_input.get("command") or ""
         if command_is_readonly(cmd, state.get("engine")):
-            sys.exit(0)
-        deny(
-            f'STOP: Medley mission "{title}" is running — only read-only commands '
+            return None
+        return (
+            f"STOP: {phrase} — only read-only commands "
             "may run in the repo (reads, read-only git). This command could mutate "
             "the workers' tree. mission_pause reclaims the repo for direct work. If "
             "no mission is actually running (stale state), check with "
             "`medley-engine service status` or delete .medley/mission-state.json."
         )
-    sys.exit(0)
+    return None
+
+
+state = load_lockdown_state(project)
+if state is not None:
+    session_id = payload.get("session_id")
+    active = active_missions(state)
+    supervised = session_supervised(active, session_id) if active else None
+    if supervised:
+        # SUPERVISING session: full lockdown, exactly today's behavior, naming the
+        # supervised mission(s) — denials repeat every time, no warn-once.
+        reason = lockdown_deny_reason(state, supervised)
+        if reason:
+            deny(reason)
+        sys.exit(0)
+    # FAIL OPEN — non-supervising session, missing/unreadable binding (binder broken,
+    # pre-update session), or old engine without missions[]. Never a repo-wide lock:
+    # warn ONCE per session that missions are live here, then fall through to the
+    # per-file active-work gate below.
+    names = active if active else [state.get("mission") or {}]
+    if lockdown_deny_reason(state, names) is not None:
+        marker = pathlib.Path(os.environ.get("TMPDIR", "/tmp")) / (
+            "medley-coexist-warned-" + str(session_id or "nosession")
+        )
+        if not marker.exists():
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.touch()
+            except Exception:
+                pass
+            deny(
+                f"Heads up (one-time): {mission_phrase(names)} in this repo from another "
+                "session — its workers may edit files under you. Your session is NOT "
+                "locked: retry and the same action will proceed (per-file conflict "
+                "warnings still apply). Keep your changes disjoint from the mission's "
+                "files, or coordinate with the user."
+            )
+    # fall through to the per-file active-work gate
 
 # ---------------------------------------------------------------------------
 # Fallthrough: original per-file warn-once gate (edit tools only)

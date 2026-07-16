@@ -18,6 +18,12 @@ STATE="${MEDLEY_DATA_DIR:-${HOME}/.medley/state}"
 TOKENFILE="${STATE}/mcp-token"
 PORT="${MEDLEY_DASHBOARD_PORT:-8730}"
 
+# The plugin data dir (${CLAUDE_PLUGIN_DATA}/bin is where the engine binary is cached). CC does NOT
+# reliably put CLAUDE_PLUGIN_DATA in the helper's env, but it DOES interpolate ${CLAUDE_PLUGIN_DATA}
+# into the headersHelper command string — so .mcp.json passes it as $1. The cold-start bridge below
+# threads it into ensure-engine.sh (which hard-requires it) so a fresh install can download the binary.
+DATADIR="${1:-${CLAUDE_PLUGIN_DATA:-}}"
+
 # The engine version THIS session's plugin is pinned to (release-managed). Sent as X-Medley-Engine-Pin
 # so the daemon can detect it's serving an older engine than this session expects and roll forward
 # (version handshake). CLAUDE_PLUGIN_ROOT is available to the helper; a version string is JSON-safe.
@@ -55,18 +61,28 @@ if [ "${MEDLEY_WORKER:-}" = "1" ]; then
   exit 0
 fi
 
-# Cold-start bridge: MCP connect races the SessionStart pre-warm (they run concurrently), so the
-# daemon may not be listening yet. Nudge it (fully detached, never blocking) so CC's connection
-# retries find a live port. `service start` no-ops fast when a healthy daemon already answers.
+# Cold-start bridge: MCP connect races the SessionStart pre-warm (they run concurrently), so the daemon
+# may not be listening yet — and on a FRESH same-session install (marketplace add → install →
+# /reload-plugins, no restart) the SessionStart hook never fired, so the engine binary was never
+# downloaded at all. When nothing answers on the port, kick a fully-detached bootstrap that (1) ensures
+# the binary is present — ensure-engine.sh is idempotent: a fast no-op when already cached, an ~80MB
+# download when missing; this is what closes the fresh-install hole the pure resolver could not — then
+# (2) starts the daemon. The whole thing is backgrounded so the helper still prints its JSON within CC's
+# 10s budget and never blocks on a download. ensure-engine.sh has its own single-flight lock, so a
+# concurrent SessionStart download is safe. CLAUDE_PLUGIN_DATA is threaded in as $1 (see above);
+# CLAUDE_PLUGIN_ROOT is inherited from the helper's env. `service start` no-ops fast when a healthy
+# daemon already answers.
 if ! curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
   DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
-  if [ -n "$ENGINE" ]; then
+  (
+    CLAUDE_PLUGIN_DATA="${DATADIR}" "$DIR/ensure-engine.sh" >/dev/null 2>&1 || true
+    ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
+    [ -n "$ENGINE" ] || exit 0
     case "$ENGINE" in
-      *.cjs|*.js|*.mjs) ( node "$ENGINE" service start >/dev/null 2>&1 & ) ;;
-      *)                ( "$ENGINE" service start >/dev/null 2>&1 & ) ;;
+      *.cjs|*.js|*.mjs) node "$ENGINE" service start >/dev/null 2>&1 || true ;;
+      *)                "$ENGINE" service start >/dev/null 2>&1 || true ;;
     esac
-  fi
+  ) &
 fi
 
 printf '{"Authorization":"Bearer %s"%s}\n' "$TOKEN" "$PIN_HDR"

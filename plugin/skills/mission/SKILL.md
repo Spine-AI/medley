@@ -22,6 +22,26 @@ open until the contract is met — the reviewer closes the loop by verifying the
 proposing the remaining work; you are the relay. The plan is the mission's opening moves,
 not its whole story (unless nothing is hidden and one shot genuinely covers it).
 
+## 0. Preflight — confirm the engine is live (before anything else)
+
+Everything below drives the `medley` MCP tools (`contract_set`, `mission_plan_submit`, `mission_start`,
+…). On a **fresh install** the engine binary + daemon may not be up yet, so those tools won't be
+registered — and planning against absent tools burns the whole interview. **Verify first.** Probe once:
+`ToolSearch "select:mcp__plugin_medley_medley__contract_set"`.
+
+- **Tools present** → proceed to step 1.
+- **Tools absent** → the engine isn't reachable yet. Do **NOT** interview, decompose, plan, or schedule,
+  and do **not** fabricate tool names or improvise the mission. The MCP connection already kicked off a
+  first-time engine download in the background; your job is to tell the user clearly and **stop this
+  turn**. Read `~/.medley/state/update.json` (a plain file, no engine needed) to sharpen the message:
+  - if it shows `{"state":"downloading",…}` → *"Medley's engine is still downloading (first-time setup).
+    Give it a few seconds, then run `/mcp` to reconnect (or open a new session) and re-run `/mission`."*
+  - otherwise → *"Medley's engine isn't up yet. If this is a brand-new install, run `/mcp` to reconnect
+    once setup finishes — or restart Claude Code, which downloads the engine automatically — then re-run
+    `/mission`."*
+  - Reassure if asked: this is **not** a login. Medley has no auth; a *"needs authentication · run /mcp"*
+    banner just means the local daemon isn't answering yet — `/mcp` only reconnects once it's up.
+
 ## 1. Interview — settle the contract
 
 Understand the goal before planning. Ground it in the repo with your own Read/Grep/Glob

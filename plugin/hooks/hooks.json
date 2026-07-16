@@ -21,6 +21,14 @@
           { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/edit-conflict-gate.py\"" }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*__mission_(start|resume|status|wait)",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/session-mission-binder.py\"" }
+        ]
+      }
     ]
   }
 }

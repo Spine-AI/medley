@@ -3,6 +3,22 @@
 All notable changes to the Medley plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). The plugin version tracks the engine version it pins.
 
+## [0.4.10] — 2026-07-16
+
+Tracks engine v0.4.10 — steadier auto-updates, a redesigned Settings dashboard, and a
+contract-anchored mission review loop (see the engine changelog for the full list). This release
+also changes the plugin scripts:
+
+### Changed
+- **`mcp-headers.sh` sends an `X-Medley-Engine-Pin` header** (the plugin's pinned engine version) so
+  the daemon can detect it's serving an older engine than the session expects and roll forward — the
+  session side of the new version handshake. Worker sessions send it too, but a worker never triggers
+  a roll of its own parent daemon.
+- **`ensure-engine.sh` writes `~/.medley/engine-path` atomically** (tmp + rename) so the daemon's new
+  stable launcher can never read a torn path.
+- **`statusline.sh` surfaces `medley ▸ ⟳ update v… pending`** while a downloaded engine upgrade waits
+  for the shared daemon to go idle before rolling (updates no longer interrupt an active mission).
+
 ## [0.4.7] — 2026-07-15
 
 Tracks engine v0.4.7 — no plugin-script change. Engine-side dashboard cleanup for the free

@@ -5,6 +5,10 @@
 # Workers inherit the plugin (settingSources) — the mission-agent reminder must never reach a
 # WORKER's context (it would misdirect it to orchestrate), and workers must not (re)install.
 [ "$MEDLEY_WORKER" = "1" ] && exit 0
+# Capture the hook payload (SessionStart / PreCompact deliver JSON on stdin). We only need the event
+# name: starter /mission suggestions are offered on SessionStart, never on PreCompact (mid-work).
+INPUT="$(cat 2>/dev/null || true)"
+HOOK_EVENT="$(printf '%s' "$INPUT" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$DIR/ensure-engine.sh" 2>/dev/null || true
 ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
@@ -52,7 +56,11 @@ MEDLEY_CLI_OFFER
   fi
   touch "$CLI_MARKER" 2>/dev/null || true
 fi
+# Starter /mission suggestions ride --brief on SessionStart only (skipped on PreCompact so a
+# mid-work compaction isn't interrupted). The engine still throttles them to once/repo/day.
+BRIEF_ARGS=()
+[ "$HOOK_EVENT" = "SessionStart" ] && BRIEF_ARGS+=(--suggest)
 case "$ENGINE" in
-  *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief 2>/dev/null ;;
-  *)                exec "$ENGINE" status --brief 2>/dev/null ;;
+  *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief "${BRIEF_ARGS[@]}" 2>/dev/null ;;
+  *)                exec "$ENGINE" status --brief "${BRIEF_ARGS[@]}" 2>/dev/null ;;
 esac

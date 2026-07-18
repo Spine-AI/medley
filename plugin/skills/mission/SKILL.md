@@ -55,14 +55,14 @@ chat) about anything that changes the work or the bar for done:
   often missing piece — get it. The commands become `verify_commands`: the **engine's
   reviewer runs them** after every batch and judges from real output — not you.
 - **Constraints** — scope boundaries, files to leave alone, model/cost/speed preferences.
-- **Limits** — how much spend, any deadline, a reviewer-round backstop if the user wants
+- **Limits** — any deadline, a reviewer-round backstop if the user wants
   one, and conditions under which to stop, check in, or just notify.
 
 Only ask what the repo and the goal don't already answer. A clear small ask needs zero
 questions. Then record it:
 
 **`contract_set({goal, target?, conditions?, verify_commands?, review_autonomy?,
-budget_usd?, deadline?, constraints?, permission_mode?})`** →
+deadline?, constraints?, permission_mode?})`** →
 
 - `target: {label, value?}` — the measurable bar for done, from the conversation
   (e.g. `{label: "all tests green"}`, `{label: "p95 latency", value: "<200ms"}`). This is
@@ -71,13 +71,12 @@ budget_usd?, deadline?, constraints?, permission_mode?})`** →
   lint). The reviewer executes them per batch; get them in the interview.
 - `review_autonomy`: `gated` (default — the reviewer's follow-up proposals park as ⚡
   attention for the user's call) | `auto` (mechanical fixes apply automatically; judgment
-  calls still park). Only set `auto` when the user asks for it. Reviewer turns spend
-  against the mission budget — say so if budget is tight.
+  calls still park). Only set `auto` when the user asks for it.
 - `conditions: [{kind, text}]` — `stop` (advisory context for the reviewer's verdict),
   `hold` (ask the user in this chat before proceeding), `ping` (notify the
   user and continue). Capture these from what the user says, don't invent them.
-- `budget_usd`, `deadline` (ISO) — **real resources the engine enforces** on every batch
-  (workers + reviewer rounds all draw from the budget). `constraints.max_iterations` (1-20)
+- `deadline` (ISO) — **a real resource the engine enforces** on every batch.
+  `constraints.max_iterations` (1-20)
   — a **backstop on consecutive reviewer-driven rounds**, a runaway-loop safety rail, not a
   ration on follow-up work (user-directed plan changes never count against it). You don't
   police any of them yourself.
@@ -199,7 +198,7 @@ trigger**: that node plus everything that `dependsOn` it (its sub-chain) re-runs
 ## 3. Approval gate — the user says yes to the CONTRACT
 
 The user approves the **destination first, the opening moves second**. Lead with the
-contract — goal, target, verify commands, conditions, budget/deadline, review autonomy —
+contract — goal, target, verify commands, conditions, deadline, review autonomy —
 as the headline they're saying yes to. Beneath it, show the plan as an **indented DAG in
 text** with each task's routed model, and say plainly which kind it is: *"this plan aims to
 complete the contract"* or *"these tasks surface what the reviewer needs to plan the rest —
@@ -253,7 +252,7 @@ done/total tasks). It's the user's persistent signal that mission mode is on.
 - "pause/kill the flaky one" → `task_interrupt` (resumable) / `task_stop` (cancels + cascades).
 - New work while running → `mission_plan_change`: add/update/cancel tasks in the live DAG
   (deps may reference existing task ids). It supersedes any open reviewer proposals; only
-  the contract's budget/deadline gate it — user-directed changes are scope, not review
+  the contract's deadline gates it — user-directed changes are scope, not review
   loops, and never consume reviewer rounds.
 
 **⚡ Attention items** — a `guarded` worker hit a risky op (destructive command, sensitive
@@ -306,7 +305,7 @@ issue verdicts yourself — relay what the engine reports:
   (once its proposal is parked as an attention item, use `attention_resolve` with `answer`
   instead); `task_interrupt review-1` aborts the turn (it retries later, or steer it).
 - `mission_plan_change` is for **user-directed extra work** — not a review verdict. The
-  engine enforces the limits, never you: budget and deadline gate every append, while the
+  engine enforces the limits, never you: the deadline gates every append, while the
   `max_iterations` backstop meters only the reviewer's own rounds (user-directed changes
   don't consume them).
 - `mission_review_submit({summary, target_met})` is a **manual override only** —
@@ -316,7 +315,7 @@ A failed task (`✗`) is not the end: `task_logs` it, then `task_resume({taskId,
 to retry with guidance, or replan around it with `mission_plan_change`.
 
 After the engine finalizes, call **`mission_receipt({missionId})`** and give the closing
-digest from it: per-task one-liners, files changed, spend vs budget, the review trail,
+digest from it: per-task one-liners, files changed, the review trail,
 anything deferred, and concrete next steps (commit, follow-up mission).
 
 ## Recovery (restart / compaction)

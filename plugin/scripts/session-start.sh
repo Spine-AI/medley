@@ -19,6 +19,20 @@ ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
 # unguarded writer defeats that guard and lets an older session drag the pointer (and, via the
 # prewarm below, the daemon) backward. Just ensure the dir exists for the marker files further down.
 mkdir -p "${HOME}/.medley" 2>/dev/null || true
+# Keep a STABLE copy of the statusline script at a fixed path outside the versioned plugin cache. A
+# statusLine wired in settings.json can't use ${CLAUDE_PLUGIN_*}, so it must hard-code a path — and a
+# path into the versioned cache dir (…/cache/medley/medley/<ver>/scripts/statusline.sh) silently
+# breaks the moment that version's cache is pruned on a later /plugin update. Pointing settings.json at
+# this stable copy instead means the statusline keeps working across every update. The copy resolves
+# the engine via ~/.medley/engine-path when run from here (see statusline.sh). Atomic (tmp + mv);
+# best-effort.
+if [ -f "$DIR/statusline.sh" ]; then
+  _sl_tmp="${HOME}/.medley/statusline.sh.tmp.$$"
+  if cp "$DIR/statusline.sh" "$_sl_tmp" 2>/dev/null; then
+    chmod +x "$_sl_tmp" 2>/dev/null || true
+    mv -f "$_sl_tmp" "${HOME}/.medley/statusline.sh" 2>/dev/null || rm -f "$_sl_tmp" 2>/dev/null || true
+  fi
+fi
 # Pre-warm the shared daemon out-of-band so it's already up (or already warming) by the time the MCP
 # server (.mcp.json → run-engine.sh mcp) attaches. Otherwise a cold session pays the daemon boot +
 # health poll INSIDE Claude Code's MCP init window and tools can fail to register on session 1.
@@ -30,19 +44,18 @@ if [ "${MEDLEY_DAEMON:-}" != "0" ]; then
     *)                ( "$ENGINE" service start >/dev/null 2>&1 & ) ;;
   esac
 fi
-# A hook's stdout is EITHER valid JSON (control fields like the starter `systemMessage`, below) OR
-# plain text (added to Claude's context) — never both. The one-time offers emit plain text, so if one
-# fires we must NOT also emit the starter JSON this session (the concatenation would be invalid JSON
-# and Claude would render the raw `{"systemMessage":…}` as context instead of showing it). Track it
-# and defer --suggest to the next session; the offers are single-shot, so starters resume immediately.
-OFFERED=0
+# Everything this hook prints is PLAIN TEXT added to Claude's context (the one-time setup offers below
+# and the starter menu from `status --brief --suggest` alike) — no JSON control fields — so any of them
+# may fire together in one session and simply concatenate. (The engine used to emit starters as a
+# `systemMessage` JSON, which couldn't mix with the plain-text offers and which Claude Code silently
+# dropped anyway; it now emits a plain-text menu instead, so there is nothing to defer.)
 # One-time statusline offer: if no statusLine is configured, ask the host to OFFER wiring the
 # medley statusline (never auto-write settings; never suggest replacing an existing one).
 # The marker makes this a single-shot regardless of the outcome. Fail-soft throughout.
 MARKER="${HOME}/.medley/statusline-offered"
 if [ ! -e "$MARKER" ]; then
   if ! grep -q '"statusLine"' "${HOME}/.claude/settings.json" 2>/dev/null; then
-    printf '%s\n' "[medley] One-time setup offer: no statusLine is configured. Offer the user the Medley statusline (live mission state — e.g. 'medley ▸ <title> · RUNNING · 4/9' — in the status bar). Only with their explicit yes, add to ~/.claude/settings.json: \"statusLine\": {\"type\": \"command\", \"command\": \"$DIR/statusline.sh\"}. If they already have a statusline configured anywhere, do NOT replace or rewire it — just show them that snippet to integrate manually. If they decline, drop it; this offer never repeats."
+    printf '%s\n' "[medley] One-time setup offer: no statusLine is configured. Offer the user the Medley statusline (live mission state — e.g. 'medley ▸ <title> · RUNNING · 4/9', or 'medley ▸ no mission · 3 starters · /mission' when idle — in the status bar). Only with their explicit yes, add to ~/.claude/settings.json: \"statusLine\": {\"type\": \"command\", \"command\": \"${HOME}/.medley/statusline.sh\"}. That path is a stable copy Medley refreshes each session, so it survives plugin updates. If they already have a statusline configured anywhere, do NOT replace or rewire it — just show them that snippet to integrate manually. If they decline, drop it; this offer never repeats."
     OFFERED=1
   fi
   touch "$MARKER" 2>/dev/null || true

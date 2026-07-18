@@ -48,8 +48,16 @@ PY
 fi
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
-[ -n "$ENGINE" ] || exit 0
+# Resolve the engine. In the plugin cache the sibling resolve-engine.sh handles it (incl. the dev
+# MEDLEY_ENGINE override); when this file is the STABLE installed copy (~/.medley/statusline.sh —
+# outside the plugin cache, see session-start.sh) there is no sibling, so fall back to the engine-path
+# cache directly. Either way the statusline survives a plugin-cache version bump / prune.
+if [ -x "$DIR/resolve-engine.sh" ]; then
+  ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
+else
+  ENGINE="$(cat "${HOME}/.medley/engine-path" 2>/dev/null || true)"
+fi
+[ -n "$ENGINE" ] && [ -f "$ENGINE" ] || exit 0
 input=$(cat)
 project=$(printf '%s' "$input" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('workspace',{}).get('project_dir') or d.get('cwd') or '')" 2>/dev/null)
 if [ -n "$project" ]; then cd "$project" 2>/dev/null || true; fi

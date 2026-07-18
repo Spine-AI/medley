@@ -30,6 +30,12 @@ if [ "${MEDLEY_DAEMON:-}" != "0" ]; then
     *)                ( "$ENGINE" service start >/dev/null 2>&1 & ) ;;
   esac
 fi
+# A hook's stdout is EITHER valid JSON (control fields like the starter `systemMessage`, below) OR
+# plain text (added to Claude's context) — never both. The one-time offers emit plain text, so if one
+# fires we must NOT also emit the starter JSON this session (the concatenation would be invalid JSON
+# and Claude would render the raw `{"systemMessage":…}` as context instead of showing it). Track it
+# and defer --suggest to the next session; the offers are single-shot, so starters resume immediately.
+OFFERED=0
 # One-time statusline offer: if no statusLine is configured, ask the host to OFFER wiring the
 # medley statusline (never auto-write settings; never suggest replacing an existing one).
 # The marker makes this a single-shot regardless of the outcome. Fail-soft throughout.
@@ -37,6 +43,7 @@ MARKER="${HOME}/.medley/statusline-offered"
 if [ ! -e "$MARKER" ]; then
   if ! grep -q '"statusLine"' "${HOME}/.claude/settings.json" 2>/dev/null; then
     printf '%s\n' "[medley] One-time setup offer: no statusLine is configured. Offer the user the Medley statusline (live mission state — e.g. 'medley ▸ <title> · RUNNING · 4/9' — in the status bar). Only with their explicit yes, add to ~/.claude/settings.json: \"statusLine\": {\"type\": \"command\", \"command\": \"$DIR/statusline.sh\"}. If they already have a statusline configured anywhere, do NOT replace or rewire it — just show them that snippet to integrate manually. If they decline, drop it; this offer never repeats."
+    OFFERED=1
   fi
   touch "$MARKER" 2>/dev/null || true
 fi
@@ -53,13 +60,16 @@ alias medley-engine='"$(cat ~/.medley/engine-path)"'
 # <<< medley cli <<<
 Then tell them to run `source ~/.zshrc` or open a new terminal. The alias re-reads ~/.medley/engine-path on each call, so it survives engine upgrades. To remove it later, delete that marked block from ~/.zshrc. If the user is on a non-zsh shell (bash/fish), show them the same alias for their own rc. If they decline, drop it — this offer never repeats.
 MEDLEY_CLI_OFFER
+    OFFERED=1
   fi
   touch "$CLI_MARKER" 2>/dev/null || true
 fi
 # Starter /mission suggestions ride --brief on SessionStart only (skipped on PreCompact so a
-# mid-work compaction isn't interrupted). The engine still throttles them to once/repo/day.
+# mid-work compaction isn't interrupted). The engine emits them as a hook `systemMessage` JSON so the
+# user SEES them at the prompt — so we skip --suggest when an offer already wrote plain text this
+# session (mixing the two would corrupt the JSON; deferred to the next, offer-free session).
 BRIEF_ARGS=()
-[ "$HOOK_EVENT" = "SessionStart" ] && BRIEF_ARGS+=(--suggest)
+[ "$HOOK_EVENT" = "SessionStart" ] && [ "$OFFERED" = "0" ] && BRIEF_ARGS+=(--suggest)
 case "$ENGINE" in
   *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief "${BRIEF_ARGS[@]}" 2>/dev/null ;;
   *)                exec "$ENGINE" status --brief "${BRIEF_ARGS[@]}" 2>/dev/null ;;

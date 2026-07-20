@@ -96,9 +96,9 @@ fi
 # gated-off repo doesn't re-spawn the engine every tick.
 runner=""; case "$ENGINE" in *.cjs|*.js|*.mjs) runner="node" ;; esac   # case OUTSIDE $() — nesting it trips the parser
 if [ -n "$runner" ]; then
-  out=$(cd "$repo" 2>/dev/null; "$runner" "$ENGINE" status --statusline 2>/dev/null)
+  out=$(cd "$repo" 2>/dev/null || :; "$runner" "$ENGINE" status --statusline 2>/dev/null)
 else
-  out=$(cd "$repo" 2>/dev/null; "$ENGINE" status --statusline 2>/dev/null)
+  out=$(cd "$repo" 2>/dev/null || :; "$ENGINE" status --statusline 2>/dev/null)
 fi
 if [ "$TTL" -gt 0 ]; then
   mkdir -p "$CACHE_DIR" 2>/dev/null || true

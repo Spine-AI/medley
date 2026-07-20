@@ -36,23 +36,23 @@ seed_settings() { mkdir -p "$1/.claude"; printf '%s' "$2" > "$1/.claude/settings
 h="$(fresh_home)"
 out="$(run_ss "$h")"
 got="$(sl_cmd "$h/.claude/settings.json")"
-[ "$got" = "$h/.medley/statusline.sh" ] && ok "seed writes stable shim path" || bad "seed" "command='$got'"
+if [ "$got" = "$h/.medley/statusline.sh" ]; then ok "seed writes stable shim path"; else bad "seed" "command='$got'"; fi
 case "$out" in *"Auto-configured a live-status statusline"*) ok "seed prints one-time note" ;; *) bad "seed-note" "note missing from output" ;; esac
-[ -e "$h/.medley/statusline-autowired" ] && ok "seed sets the marker" || bad "seed-marker" "marker not created"
+if [ -e "$h/.medley/statusline-autowired" ]; then ok "seed sets the marker"; else bad "seed-marker" "marker not created"; fi
 
 # 2. HEAL: a statusLine on a versioned plugin-cache path → repointed to the stable shim.
 h="$(fresh_home)"
 seed_settings "$h" '{"statusLine":{"type":"command","command":"/x/.claude/plugins/cache/medley/medley/0.6.1/scripts/statusline.sh"}}'
 run_ss "$h" >/dev/null
 got="$(sl_cmd "$h/.claude/settings.json")"
-[ "$got" = "$h/.medley/statusline.sh" ] && ok "heal repoints a stale medley path" || bad "heal" "command='$got'"
+if [ "$got" = "$h/.medley/statusline.sh" ]; then ok "heal repoints a stale medley path"; else bad "heal" "command='$got'"; fi
 
 # 3. FOREIGN: a non-medley statusLine is left exactly as-is (never clobbered).
 h="$(fresh_home)"
 seed_settings "$h" '{"statusLine":{"type":"command","command":"/usr/local/bin/my-status.sh"}}'
 run_ss "$h" >/dev/null
 got="$(sl_cmd "$h/.claude/settings.json")"
-[ "$got" = "/usr/local/bin/my-status.sh" ] && ok "foreign statusline untouched" || bad "foreign" "command='$got'"
+if [ "$got" = "/usr/local/bin/my-status.sh" ]; then ok "foreign statusline untouched"; else bad "foreign" "command='$got'"; fi
 
 # 4. RESPECT REMOVAL: marker already present + no statusLine → NOT re-added (user removed it on purpose).
 h="$(fresh_home)"
@@ -60,25 +60,25 @@ mkdir -p "$h/.medley"; : > "$h/.medley/statusline-autowired"
 mkdir -p "$h/.claude"; printf '%s' '{"model":"opus"}' > "$h/.claude/settings.json"
 run_ss "$h" >/dev/null
 got="$(sl_cmd "$h/.claude/settings.json")"
-[ -z "$got" ] && ok "removed line not re-added once marker exists" || bad "respect-removal" "command='$got'"
+if [ -z "$got" ]; then ok "removed line not re-added once marker exists"; else bad "respect-removal" "command='$got'"; fi
 
 # 5. IDEMPOTENT: already on the stable shim → no rewrite, no .medley.bak.
 h="$(fresh_home)"; mkdir -p "$h/.medley"
 seed_settings "$h" '{"statusLine":{"type":"command","command":"'"$h"'/.medley/statusline.sh"}}'
 run_ss "$h" >/dev/null
-[ ! -e "$h/.claude/settings.json.medley.bak" ] && ok "no-op when already correct (no backup written)" || bad "idempotent" "unexpected .medley.bak"
+if [ ! -e "$h/.claude/settings.json.medley.bak" ]; then ok "no-op when already correct (no backup written)"; else bad "idempotent" "unexpected .medley.bak"; fi
 
 # 6. PRESERVE: seeding keeps sibling keys intact.
 h="$(fresh_home)"
 seed_settings "$h" '{"model":"opus","env":{"FOO":"bar"}}'
 run_ss "$h" >/dev/null
 keep="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("model",""),d.get("env",{}).get("FOO",""))' "$h/.claude/settings.json" 2>/dev/null)"
-[ "$keep" = "opus bar" ] && ok "seed preserves sibling keys" || bad "preserve" "siblings='$keep'"
+if [ "$keep" = "opus bar" ]; then ok "seed preserves sibling keys"; else bad "preserve" "siblings='$keep'"; fi
 
 # 7. MALFORMED: invalid JSON is never touched (no crash, byte-identical after).
 h="$(fresh_home)"; mkdir -p "$h/.claude"
 printf '%s' '{ this is not json' > "$h/.claude/settings.json"
 run_ss "$h" >/dev/null
-[ "$(cat "$h/.claude/settings.json")" = '{ this is not json' ] && ok "malformed settings.json left intact" || bad "malformed" "file was modified"
+if [ "$(cat "$h/.claude/settings.json")" = '{ this is not json' ]; then ok "malformed settings.json left intact"; else bad "malformed" "file was modified"; fi
 
 if [ "$fail" = 0 ]; then echo "ok: statusline auto-wire (seed/heal/foreign/removal/idempotent/preserve/malformed)"; else exit 1; fi

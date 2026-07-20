@@ -45,9 +45,11 @@ assert_empty "$(run)" "idle"
 # cwd, so we can assert BOTH the call-count (caching) and per-repo isolation (which repo it ran for).
 # No .cjs/.js/.mjs suffix → statusline.sh runs it directly.
 FAKE="$tmp/fake-engine"
+# shellcheck disable=SC2016  # $CE_COUNTER/$PWD are intentionally literal — they expand when the fake engine runs
 printf '#!/usr/bin/env bash\necho call >> "$CE_COUNTER"\nprintf "medley ▸ %%s" "$PWD"\n' > "$FAKE"
 chmod +x "$FAKE"
 EMPTY_FAKE="$tmp/fake-engine-empty"   # counts but prints nothing (to prove empty output is cached)
+# shellcheck disable=SC2016  # $CE_COUNTER intentionally literal (see above)
 printf '#!/usr/bin/env bash\necho call >> "$CE_COUNTER"\n' > "$EMPTY_FAKE"
 chmod +x "$EMPTY_FAKE"
 mkdir -p "$tmp/rA" "$tmp/rB"          # real dirs so the engine subshell can cd into them ($PWD differs)

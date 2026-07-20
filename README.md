@@ -28,11 +28,12 @@ Then: `/mission <your goal>` → answer the interview → review the proposed DA
 runtime + model) → say "go". Steer with plain language ("tell the UI task to use shadcn", "kill the
 flaky one"). Open the dashboard any time with `/dashboard`.
 
-**Optional statusline** — a one-line mission ticker. Add to your `settings.json`:
-
-```json
-"statusLine": { "type": "command", "command": "<path-to-plugin>/scripts/statusline.sh" }
-```
+**Statusline** — a one-line mission ticker (`medley ▸ <title> · RUNNING · 4/9` while a mission runs,
+`medley ▸ no mission · 3 starters · /mission` when idle) is set up automatically. On first session
+Medley adds a `statusLine` entry to your `~/.claude/settings.json` pointing at a stable copy it
+refreshes each session (`~/.medley/statusline.sh`), so it survives plugin updates. It never touches a
+statusline you already have. To turn it off, delete the `statusLine` block from your `settings.json`
+(Medley won't re-add it); a full uninstall removes it for you.
 
 ### Requirements
 - macOS (arm64/x64). The engine is a self-contained binary — **Node is not required**.

@@ -16,6 +16,13 @@ FAKE="$tmp/fake-engine"
 printf '#!/usr/bin/env bash\necho "ENGINE_ARGS:$*"\n' > "$FAKE"
 chmod +x "$FAKE"
 
+# The one-time setup steps (statusline auto-wire SEED, CLI alias offer) print plain text and set
+# OFFERED=1, which suppresses --suggest — masking the mapping under test. Pre-seed their markers so
+# this session is offer-free and OFFERED stays 0 (auto-wire behavior has its own test file).
+mkdir -p "$tmp/.medley"
+: > "$tmp/.medley/statusline-autowired"
+: > "$tmp/.medley/cli-offered"
+
 # Drive session-start.sh with a hook payload on stdin (as Claude Code delivers it).
 run() { # $1 = JSON payload; empty MEDLEY_WORKER; daemon prewarm disabled
   printf '%s' "$1" | HOME="$tmp" MEDLEY_DATA_DIR="$tmp" MEDLEY_ENGINE="$FAKE" MEDLEY_DAEMON=0 MEDLEY_WORKER="" bash "$SS" 2>/dev/null

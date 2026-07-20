@@ -3,6 +3,28 @@
 All notable changes to the Medley plugin are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/). The plugin version tracks the engine version it pins.
 
+## [0.6.4] — 2026-07-21
+
+Plugin-only maintenance release (tracks engine v0.6.3 — no engine change). Two `session-start.sh` /
+`statusline.sh` improvements:
+
+### Changed
+- **The statusline is now auto-configured for every user.** `statusLine` can't be shipped in a
+  plugin manifest (Claude Code silently ignores it), so `session-start.sh` writes it into
+  `~/.claude/settings.json` on first session, pointing at the stable `~/.medley/statusline.sh` copy it
+  refreshes each run (survives plugin-cache pruning). It heals an older medley statusline that still
+  points into the versioned plugin cache, never touches a statusline you configured yourself, and
+  never re-adds one you removed. A full uninstall strips it back out.
+- **The statusline slow path now serves a short-TTL per-repo cache.** Claude Code re-invokes the
+  statusline on a ~300ms throttle and each call cold-started the engine binary + opened SQLite; it now
+  serves a cached line (a file read) within `MEDLEY_STATUSLINE_TTL` seconds (default 2, `0` disables),
+  cold-starting the engine only on a miss. The cache is keyed and verified per repo, so one repo's
+  mission can never appear in another. The engine-free update-state fast path is unchanged.
+
+### Fixed
+- `session-start.sh` initialized the `--suggest` gate (`OFFERED`) so the SessionStart starter menu is
+  emitted as intended (it was previously suppressed).
+
 ## [0.4.10] — 2026-07-16
 
 Tracks engine v0.4.10 — steadier auto-updates, a redesigned Settings dashboard, and a

@@ -255,6 +255,26 @@ done/total tasks). It's the user's persistent signal that mission mode is on.
   the contract's deadline gates it — user-directed changes are scope, not review
   loops, and never consume reviewer rounds.
 
+**Re-contracting — the destination itself changes.** When the **goal / target / done-bar /
+conditions / verify commands / deadline / constraints** change — not "do more work" but "we're
+aiming somewhere different" — use `mission_recontract`, **not** `mission_plan_change`.
+
+- **Tell them apart:** more/adjusted work under the same goal → `mission_plan_change`. The bar for
+  "done" moves → `mission_recontract`.
+- **Confirm first, exactly like the opening approval gate:** interview the delta (what changes and
+  why), echo the revised contract back with a before/after diff, and **wait for their explicit
+  "go"** — you carry that approval into the call. Never re-contract without the yes.
+- **The engine branches on mission state for you:** if the mission is already **complete**, the tool
+  refuses — start a **new mission** instead (`contract_set → mission_plan_submit → mission_start`);
+  there's nothing live to reuse. Otherwise it **reuses the same mission & task tree** — cancels every
+  in-flight + pending task (and any running review), **keeps everything already `done`**, and grafts
+  your `plan` as a fresh batch the engine reviews once against the **new** contract.
+- **Author `plan` against completed work:** reference prior task outputs in the briefs and
+  `dependsOn` finished task ids — the kept work is already on disk, so build on it, don't redo it.
+- `mission_recontract({contractId, plan, goal?, target?, conditions?, verify_commands?, deadline?,
+  constraints?, permission_mode?, review_autonomy?, review_guidance?, planning_notes?})` — every
+  contract field is optional (patch semantics); only `plan` (the new frontier batch) is required.
+
 **⚡ Attention items** — a `guarded` worker hit a risky op (destructive command, sensitive
 path, MCP write) or asked a question and is **parked** until resolved:
 - `attention_list` → surface the item to the user with the command/context and clear
@@ -360,4 +380,5 @@ Know which stop the user means:
 | "hold on / I need the repo" | `mission_pause` | workers wind down gracefully (sessions saved), lockdown lifts, mission holds — `mission_resume` continues |
 | pause one flaky task | `task_interrupt` | that task parks; `task_resume` restarts it with guidance |
 | "kill it" | `mission_stop` | cancels everything (cascades); a receipt is still written |
+| "change what we're building / the goal moved" | `mission_recontract` | NOT a stop — reuses the tree, keeps done work, cancels in-flight+pending, relaunches toward the new contract (see §4 Re-contracting) |
 | walk away | nothing — close the session | daemon + workers keep going; any later session picks the mission up via the SessionStart reminder |

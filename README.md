@@ -29,7 +29,7 @@ runtime + model) → say "go". Steer with plain language ("tell the UI task to u
 flaky one"). Open the dashboard any time with `/dashboard`.
 
 **Statusline** — a one-line mission ticker (`medley ▸ <title> · RUNNING · 4/9` while a mission runs,
-`medley ▸ no mission · 3 starters · /mission` when idle) is set up automatically. On first session
+empty when no mission is active) is set up automatically. On first session
 Medley adds a `statusLine` entry to your `~/.claude/settings.json` pointing at a stable copy it
 refreshes each session (`~/.medley/statusline.sh`), so it survives plugin updates. It never touches a
 statusline you already have. To turn it off, delete the `statusLine` block from your `settings.json`

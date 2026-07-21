@@ -1,6 +1,6 @@
 #!/bin/bash
 # Statusline command: e.g. `medley ▸ Fix login · RUNNING · 4/9 · 2 workers · ⚡ NEEDS YOU (1)`
-# (or `medley ▸ no mission · 3 starters · /mission` when idle; empty when gated off). Wired in
+# (empty when no mission is active or when gated off). Wired in
 # settings.json (see the plugin README):
 #   "statusLine": { "type": "command", "command": "/abs/path/to/plugin/scripts/statusline.sh" }
 # Runs in a settings.json context that lacks ${CLAUDE_PLUGIN_DATA}; resolve-engine.sh falls back

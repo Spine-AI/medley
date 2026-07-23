@@ -20,9 +20,9 @@ Inside Claude Code:
 /plugin install medley
 ```
 
-That's it. Your **next session** downloads the engine automatically (a single notarized binary for
-your platform, from GitHub Releases — no token, no npm), then everything just works. No
-`--plugin-dir`, no build toolchain.
+That's it. Your **next session** downloads the engine automatically (a single code-signed binary
+from `engine.getmedley.ai`, with the public GitHub Release as fallback — no token, no npm), then
+everything just works. No `--plugin-dir`, no build toolchain.
 
 Then: `/mission <your goal>` → answer the interview → review the proposed DAG (each task's routed
 runtime + model) → say "go". Steer with plain language ("tell the UI task to use shadcn", "kill the
@@ -36,7 +36,8 @@ statusline you already have. To turn it off, delete the `statusLine` block from 
 (Medley won't re-add it); a full uninstall removes it for you.
 
 ### Requirements
-- macOS (arm64/x64). The engine is a self-contained binary — **Node is not required**.
+- macOS on Apple Silicon (arm64). The engine is a self-contained binary — **Node is not
+  required**. (Intel Macs are not supported; on other platforms the plugin no-ops cleanly.)
 - The `claude` CLI on your PATH (workers spawn via the Claude Agent SDK for subscription auth).
 - Optional: the `codex` CLI (`codex login`) to add Codex workers to the routing pool.
 - Optional: the `agent` CLI (`agent login`, from [cursor.com/install](https://cursor.com/install))
@@ -94,6 +95,36 @@ plugin/
   skills/mission, skills/dashboard the /mission and /dashboard skills (+ per-runtime routing guides)
 ```
 
+## Security & privacy
+
+What this plugin does on your machine, stated plainly:
+
+- **Downloads and runs a compiled binary.** On session start the plugin downloads the Medley
+  engine — a closed-source, self-contained executable — from `engine.getmedley.ai` (Cloudflare R2),
+  falling back to the [public GitHub Release](https://github.com/Spine-AI/medley/releases). The
+  version is pinned in `plugin/engine/version` (release-managed), the download is verified against
+  the release's `SHA256SUMS`, and the binary is Developer ID code-signed (not notarized — a CLI
+  fetched via `curl` is never quarantined, so Gatekeeper's notarization check does not apply).
+- **Runs a background daemon.** The engine installs a single launchd LaunchAgent
+  (`ai.getmedley.daemon`) so missions keep running between sessions. It binds to
+  `127.0.0.1:8730` only — the MCP server and dashboard are never exposed off-host, and `/api` +
+  `/mcp` require a local bearer token or same-origin browser request.
+- **Local state.** Mission state lives in SQLite under `~/.medley/`; nothing is synced anywhere.
+- **Telemetry is consent-gated and content-free.** Usage telemetry (PostHog) and crash reports
+  (Sentry) are only sent with consent, and events carry enums, counts, durations, and exit codes
+  only — never prompts, file contents, paths, or repo names. (The pipeline currently ships
+  disabled.)
+- **Workers run with your own auth.** Spawned workers use the `claude` / `codex` / `agent` CLIs
+  already installed and logged in on your machine; the plugin never handles your credentials.
+
+Uninstall: `/plugin uninstall medley` unregisters the plugin but leaves the daemon and state
+behind — run `plugin/scripts/uninstall.sh` for a complete removal (LaunchAgent, downloaded
+binaries, `~/.medley/` state; `--dry-run` shows the plan first, `--keep-data` preserves mission
+history).
+
 ## License
 
-MIT — see [LICENSE](./LICENSE). (The mission engine is a separate, closed package.)
+The code in this repository — the plugin shim (scripts, hooks, skills, manifests) — is MIT-licensed;
+see [LICENSE](./LICENSE). **Medley itself is not open source**: the mission engine the plugin
+downloads is proprietary, closed-source software © Spine, distributed only as a compiled binary and
+licensed for use with Medley. The MIT grant does not extend to the engine.

@@ -1,3 +1,10 @@
+Scope: this license covers ONLY the source files in this repository — the Medley
+plugin shim (scripts, hooks, skills, and manifests). The Medley engine — the
+compiled binary this plugin downloads and runs, and the source it is built
+from — is proprietary, closed-source software of Spine (getspine.ai), all
+rights reserved, and is NOT covered by this license. Medley as a product is
+not open source.
+
 MIT License
 
 Copyright (c) 2026 Spine (getspine.ai)

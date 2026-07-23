@@ -5,6 +5,16 @@
       "url": "http://127.0.0.1:8730/mcp",
       "headers": { "X-Medley-Repo-Raw": "${CLAUDE_PROJECT_DIR}" },
       "headersHelper": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-headers.sh\" \"${CLAUDE_PLUGIN_DATA}\""
+    },
+    "medley_gateway": {
+      "type": "http",
+      "url": "http://127.0.0.1:8730/mcp",
+      "headers": {
+        "X-Medley-Repo-Raw": "${CLAUDE_PROJECT_DIR}",
+        "X-Medley-Worker": "1",
+        "X-Medley-Caller": "top-level"
+      },
+      "headersHelper": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-headers.sh\" \"${CLAUDE_PLUGIN_DATA}\""
     }
   }
 }

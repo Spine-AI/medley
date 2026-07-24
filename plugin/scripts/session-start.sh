@@ -5,10 +5,10 @@
 # Workers inherit the plugin (settingSources) — the mission-agent reminder must never reach a
 # WORKER's context (it would misdirect it to orchestrate), and workers must not (re)install.
 [ "$MEDLEY_WORKER" = "1" ] && exit 0
-# Capture the hook payload (SessionStart / PreCompact deliver JSON on stdin). We only need the event
-# name: starter /mission suggestions are offered on SessionStart, never on PreCompact (mid-work).
-INPUT="$(cat 2>/dev/null || true)"
-HOOK_EVENT="$(printf '%s' "$INPUT" | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+# Drain the hook payload (SessionStart / PreCompact deliver JSON on stdin). We don't need any field
+# from it — the same active-mission reminder is injected on both events — but consuming stdin avoids a
+# broken pipe on the delivering side.
+cat >/dev/null 2>&1 || true
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$DIR/ensure-engine.sh" 2>/dev/null || true
 ENGINE="$("$DIR/resolve-engine.sh" 2>/dev/null || true)"
@@ -45,14 +45,8 @@ if [ "${MEDLEY_DAEMON:-}" != "0" ]; then
   esac
 fi
 # Everything this hook prints is PLAIN TEXT added to Claude's context (the one-time setup offers below
-# and the starter menu from `status --brief --suggest` alike) — no JSON control fields — so any of them
-# may fire together in one session and simply concatenate. (The engine used to emit starters as a
-# `systemMessage` JSON, which couldn't mix with the plain-text offers and which Claude Code silently
-# dropped anyway; it now emits a plain-text menu instead, so there is nothing to defer.)
-# OFFERED gates the starter --suggest below (line ~85): a plain-text offer/note printed this session
-# would corrupt the engine's --suggest JSON, so they're mutually exclusive. MUST init to 0 — leaving it
-# unset made `[ "$OFFERED" = "0" ]` never true, so --suggest was dead (and this hook's own test red).
-OFFERED=0
+# and the active-mission reminder from `status --brief` alike) — no JSON control fields — so any of
+# them may fire together in one session and simply concatenate.
 # Auto-wire the Medley statusline into ~/.claude/settings.json. `statusLine` is a USER-scoped setting a
 # plugin can't ship (plugin.json has no such field; a plugin settings.json silently ignores every key
 # but `agent`/`subagentStatusLine`), so the only way it reaches every user is for this hook to write it.
@@ -117,8 +111,7 @@ print(action)
 PY
 )"
   if [ "$SL_ACTION" = "seeded" ]; then
-    printf '%s\n' "[medley] Auto-configured a live-status statusline: added a statusLine entry to ~/.claude/settings.json pointing at ~/.medley/statusline.sh (a stable copy this plugin refreshes each session, so it survives updates). It shows mission progress while a mission runs, and idle /mission starters otherwise. Let the user know it is set up — they can remove the statusLine block from settings.json any time, and the uninstaller clears it too."
-    OFFERED=1
+    printf '%s\n' "[medley] Auto-configured a live-status statusline: added a statusLine entry to ~/.claude/settings.json pointing at ~/.medley/statusline.sh (a stable copy this plugin refreshes each session, so it survives updates). It shows mission progress while a mission runs. Let the user know it is set up — they can remove the statusLine block from settings.json any time, and the uninstaller clears it too."
   fi
 fi
 # One-time CLI offer: if the `medley-engine` command isn't on the user's PATH, offer (once) to add
@@ -134,17 +127,12 @@ alias medley-engine='"$(cat ~/.medley/engine-path)"'
 # <<< medley cli <<<
 Then tell them to run `source ~/.zshrc` or open a new terminal. The alias re-reads ~/.medley/engine-path on each call, so it survives engine upgrades. To remove it later, delete that marked block from ~/.zshrc. If the user is on a non-zsh shell (bash/fish), show them the same alias for their own rc. If they decline, drop it — this offer never repeats.
 MEDLEY_CLI_OFFER
-    OFFERED=1
   fi
   touch "$CLI_MARKER" 2>/dev/null || true
 fi
-# Starter /mission suggestions ride --brief on SessionStart only (skipped on PreCompact so a
-# mid-work compaction isn't interrupted). The engine emits them as a hook `systemMessage` JSON so the
-# user SEES them at the prompt — so we skip --suggest when an offer already wrote plain text this
-# session (mixing the two would corrupt the JSON; deferred to the next, offer-free session).
-BRIEF_ARGS=()
-[ "$HOOK_EVENT" = "SessionStart" ] && [ "$OFFERED" = "0" ] && BRIEF_ARGS+=(--suggest)
+# Inject the active-mission reminder (empty when no mission is active) so mission mode survives
+# restarts and compaction. Plain text — concatenates after any one-time setup offers printed above.
 case "$ENGINE" in
-  *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief "${BRIEF_ARGS[@]}" 2>/dev/null ;;
-  *)                exec "$ENGINE" status --brief "${BRIEF_ARGS[@]}" 2>/dev/null ;;
+  *.cjs|*.js|*.mjs) exec node "$ENGINE" status --brief 2>/dev/null ;;
+  *)                exec "$ENGINE" status --brief 2>/dev/null ;;
 esac

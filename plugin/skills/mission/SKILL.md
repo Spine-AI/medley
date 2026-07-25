@@ -119,13 +119,32 @@ frontier. When nothing is hidden, a complete one-shot DAG is exactly right (and 
 legitimate). When the user adds scope mid-flight, it goes into the **contract** (the
 destination) and reaches the plan as frontier work — not as a bigger upfront DAG.
 
+**The frontier bounds WHAT you include, never HOW you order it.** Those are two separate
+decisions; collapsing them is the most common planning error. Once a node is in the plan
+it carries the edges its work actually requires — deferring *ordering* to the reviewer is
+not frontier planning, it's a dropped dependency. If a node's inputs don't exist yet you
+have two honest options: give it the edge, or leave it out of this batch. Never include
+it edge-free.
+
 Each node runs only after every node in its `dependsOn` finished; nodes with no path
 between them run **in parallel in the same working tree**.
 
-**The iron rule: parallel tasks must touch DISJOINT files.** There are no worktrees and no
-branches — two workers editing one file clobber each other. Partition by file ownership
-(you read the repo; name the real paths). If two pieces of work share files, put an edge
-between them. A reviewer/verifier node `dependsOn` the work it checks.
+**Two independent reasons to edge two nodes — check BOTH:**
+
+1. **Shared files (the iron rule).** Parallel tasks must touch DISJOINT files. There are
+   no worktrees and no branches — two workers editing one file clobber each other.
+   Partition by file ownership (you read the repo; name the real paths). If two pieces of
+   work share files, edge them.
+2. **Consumed output.** If B reads, cites, summarizes, verifies, assembles, or decides
+   from what A produces, B `dependsOn` A — **even when their files are perfectly
+   disjoint**. Disjointness only proves they can't clobber each other; it says nothing
+   about whether B has its inputs. Synthesis-shaped nodes are almost always downstream:
+   papers, reports, summaries, recommendations, decision memos, integration work, and
+   every reviewer/verifier node (which `dependsOn` the work it checks).
+
+The test for any pair: *if these two start at the same second, does either have to invent
+what the other was going to tell it?* If yes, that's an edge — a node that starts by
+reading a sibling's unwritten output doesn't fail, it produces confident fiction.
 
 Per node:
 - **slug** — short kebab-case handle (`build-api`), **label** — 2-3 word title, **role** —
@@ -157,7 +176,9 @@ Per node:
   field falls back to the deterministic prefer order, which resolves to claude-code by
   default — a fallback, not a recommendation.)
 - **dependsOn** — parent slugs; `[]` for roots. **Prose ordering does nothing** — only
-  these edges gate execution.
+  these edges gate execution. Naming upstream work in the `brief` ("builds on the audit")
+  is context for the worker, *not* an edge: without `dependsOn` it starts immediately and
+  the upstream isn't there.
 
 **`mission_plan_submit({contractId, plan, planning_notes?})`** validates (unique slugs,
 real deps, no cycles) and returns the routed model per task. Fix and resubmit on errors.

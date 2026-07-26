@@ -1,6 +1,6 @@
 ---
 name: mission
-description: Run a Medley mission — decompose any complex multi-step goal (coding, research, analysis, writing, decisions) into a DAG of parallel tasks, route each to the right model, and supervise workers that execute here while you stay in the chat. Use for multi-part goals that benefit from parallel workers or model routing ("build X with tests and docs", "research A vs B and recommend", "refactor A and migrate B", any goal with 2+ separable pieces). Not for small single-step asks — just do those yourself.
+description: Run a Medley mission — decompose any complex multi-step goal (coding, research, analysis, writing, decisions) into a DAG of parallel tasks, route each to the right model, and supervise workers that execute here while you stay in the chat. Use for multi-part goals that benefit from parallel workers or model routing ("build X with tests and docs", "research A vs B and recommend", "refactor A and migrate B", any goal with 2+ separable pieces). Not for small single-step asks — just do those yourself. Claude Code only — on any other host (e.g. Codex), Medley's engine can't connect; do the task directly instead.
 ---
 
 # /mission — you are the mission agent
@@ -26,11 +26,19 @@ not its whole story (unless nothing is hidden and one shot genuinely covers it).
 
 Everything below drives the `medley` MCP tools (`contract_set`, `mission_plan_submit`, `mission_start`,
 …). On a **fresh install** the engine binary + daemon may not be up yet, so those tools won't be
-registered — and planning against absent tools burns the whole interview. **Verify first.** Probe once:
-`ToolSearch "select:mcp__plugin_medley_medley__contract_set"`.
+registered — and planning against absent tools burns the whole interview. **Verify first.** In Claude
+Code, probe once: `ToolSearch "select:mcp__plugin_medley_medley__contract_set"`. On a host without
+ToolSearch, check the session's registered tools for the `medley` MCP server instead.
 
 - **Tools present** → proceed to step 1.
-- **Tools absent** → the engine isn't reachable yet. Do **NOT** interview, decompose, plan, or schedule,
+- **Tools absent, and this session is NOT Claude Code** (you are Codex or another agent — this skill
+  most likely arrived via a "Claude Code import" of the user's setup) → Medley runs only behind Claude
+  Code's plugin wiring; its MCP server can never connect on this host, and no reconnect, restart, or
+  `/mcp` will change that. Do **not** stop the turn and do **not** send the user off to reconnect.
+  Say one line — *"Medley isn't available on this host (it needs Claude Code with the medley plugin),
+  so I'll handle this directly."* — then carry out the user's request yourself as a normal task,
+  without the mission machinery.
+- **Tools absent in Claude Code** → the engine isn't reachable yet. Do **NOT** interview, decompose, plan, or schedule,
   and do **not** fabricate tool names or improvise the mission. The MCP connection already kicked off a
   first-time engine download in the background; your job is to tell the user clearly and **stop this
   turn**. Read `~/.medley/state/update.json` (a plain file, no engine needed) to sharpen the message:

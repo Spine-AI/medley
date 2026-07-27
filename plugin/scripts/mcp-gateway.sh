@@ -40,9 +40,10 @@ DATADIR="${1:-${CLAUDE_PLUGIN_DATA:-}}"
 PLUGIN_ROOT="$(cd "$DIR/.." && pwd)"
 VERSION=""
 for root in "$PLUGIN_ROOT" "${CLAUDE_PLUGIN_ROOT:-}"; do
-  [ -n "$root" ] && [ -f "$root/engine/version" ] || continue
-  VERSION="$(tr -d ' \t\n\r' < "$root/engine/version" 2>/dev/null)"
-  [ -n "$VERSION" ] && break
+  if [ -n "$root" ] && [ -f "$root/engine/version" ]; then
+    VERSION="$(tr -d ' \t\n\r' < "$root/engine/version" 2>/dev/null)"
+    if [ -n "$VERSION" ]; then break; fi
+  fi
 done
 
 ENGINE=""

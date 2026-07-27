@@ -18,7 +18,7 @@ ROOT="$tmp/root"
 mkdir -p "$BIN" "$ROOT/engine"
 
 # Stub engine binaries (session-start.sh exec's `status --brief` on the resolved one; a no-op suffices).
-for v in 0.4.1 0.4.5 0.4.6; do
+for v in 0.4.1 0.4.5 0.4.6 0.8.5 0.8.6 0.8.6-dev.0 0.8.6-dev.1 0.8.6-dev.2 0.8.6-dev.10 0.8.7; do
   printf '#!/bin/bash\nexit 0\n' > "$BIN/medley-engine-$v"
   chmod +x "$BIN/medley-engine-$v"
 done
@@ -52,5 +52,28 @@ assert_eq "$(run_session 0.4.5 "$BIN/medley-engine-0.4.5")" "$BIN/medley-engine-
 
 # 4. Cold start (no pointer) is bootstrapped by ensure-engine.sh, not session-start.sh.
 assert_eq "$(run_session 0.4.5 "")" "$BIN/medley-engine-0.4.5" "cold bootstrap"
+
+# 5-9. Dev channel (X.Y.Z-dev.N). The shipped field-wise sort ties on every key for two dev builds
+# of the same x.y.z, which both stalled the pointer (dev.1 never advanced past dev.0) and let a
+# stale session stamp it backward. Ordering must match the engine's cmp() in runtime-version.ts.
+assert_eq "$(run_session 0.8.6-dev.1 "$BIN/medley-engine-0.8.6-dev.0")" \
+  "$BIN/medley-engine-0.8.6-dev.1" "dev.0 -> dev.1 advances"
+assert_eq "$(run_session 0.8.6-dev.10 "$BIN/medley-engine-0.8.6-dev.2")" \
+  "$BIN/medley-engine-0.8.6-dev.10" "dev.2 -> dev.10 advances (not lexical)"
+assert_eq "$(run_session 0.8.6-dev.0 "$BIN/medley-engine-0.8.6-dev.1")" \
+  "$BIN/medley-engine-0.8.6-dev.1" "stale dev.0 does not downgrade dev.1"
+assert_eq "$(run_session 0.8.7 "$BIN/medley-engine-0.8.6-dev.10")" \
+  "$BIN/medley-engine-0.8.7" "dev prerelease -> stable advances"
+assert_eq "$(run_session 0.8.6-dev.1 "$BIN/medley-engine-0.8.5")" \
+  "$BIN/medley-engine-0.8.6-dev.1" "stable -> dev prerelease advances"
+
+# 10-11. A stable X.Y.Z and its own X.Y.Z-dev.0 are cmp-EQUAL (both parse to [X,Y,Z,0]), so >= holds
+# in BOTH directions and either pin may claim the pointer. The pre-fix sort -r tiebreak made the
+# shorter string always lose, so a dev -> stable switch at the same x.y.z stranded the pointer in the
+# dev plugin's bin dir.
+assert_eq "$(run_session 0.8.6 "$BIN/medley-engine-0.8.6-dev.0")" \
+  "$BIN/medley-engine-0.8.6" "stable claims pointer from its own dev.0"
+assert_eq "$(run_session 0.8.6-dev.0 "$BIN/medley-engine-0.8.6")" \
+  "$BIN/medley-engine-0.8.6-dev.0" "dev.0 claims pointer from its own stable"
 
 if [ "$fail" = 0 ]; then echo "ok: engine-path no-downgrade"; else exit 1; fi

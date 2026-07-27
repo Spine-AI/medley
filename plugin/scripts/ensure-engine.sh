@@ -22,12 +22,25 @@ VERSION="$(tr -d ' \t\n\r' < "$VERSION_FILE")"
 BIN_DIR="${CLAUDE_PLUGIN_DATA}/bin"
 BIN_PATH="${BIN_DIR}/medley-engine-${VERSION}"
 
-# Portable "is $1 >= $2" for dotted x.y.z versions (macOS BSD sort has no -V, so compare field by
-# field, numeric, descending, and check the winner is $1). Prerelease suffixes sort lexically within
-# a field — acceptable for our stable release scheme.
+# Order version strings newest-FIRST on stdout. Handles the dev channel's `X.Y.Z-dev.N` prereleases
+# by folding N into a fourth numeric field, matching the engine's cmp() (runtime-version.ts), which
+# parseInt's each dot-separated field — so `0.8.6-dev.1` is [0,8,6,1]. An explicit zero-padded key is
+# built here rather than leaning on `sort -t.` field keys: for `0.8.6-dev.1` the third field is
+# `6-dev` and the fourth is never compared, so two dev builds of one x.y.z tied on EVERY key and fell
+# back to whole-line lexicographic order. That stalled the engine-path pointer (dev.1 never advanced
+# past dev.0), let a stale session stamp it backward, and made prune treat the oldest build as newest.
+# (macOS BSD sort has no -V, hence the hand-built key.)
+vsort_desc() {
+  awk '{
+    v = $0; sub(/-dev\./, ".", v); n = split(v, p, ".")
+    printf "%05d.%05d.%05d.%05d\t%s\n", p[1]+0, p[2]+0, p[3]+0, (n > 3 ? p[4]+0 : 0), $0
+  }' | sort -r | cut -f2
+}
+
+# Portable "is $1 >= $2" for dotted x.y.z[-dev.N] versions.
 version_ge() {
   [ "$1" = "$2" ] && return 0
-  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)" = "$1" ]
+  [ "$(printf '%s\n%s\n' "$1" "$2" | vsort_desc | head -1)" = "$1" ]
 }
 
 # Record the engine-path cache the statusline + resolver fall back to — but only ever ADVANCE it. A
@@ -151,13 +164,13 @@ fi
 # the one it still points at — in the window before the daemon repoints the plist — would strand the
 # shared daemon; keeping the current pin + its predecessor closes that window. Only the NEWEST-pin
 # session prunes, so a stale older-pin session neither deletes a newer binary nor thrashes
-# re-downloading its own. BSD sort has no -V → sort the dotted version numerically by field. Fail-soft.
+# re-downloading its own. Ordering is vsort_desc (dev-prerelease aware; see its header). Fail-soft.
 newest="$(find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' 2>/dev/null \
-  | sed 's#.*/medley-engine-##' | sort -t. -k1,1nr -k2,2nr -k3,3nr | head -1)"
+  | sed 's#.*/medley-engine-##' | vsort_desc | head -1)"
 if [ "$newest" = "$VERSION" ]; then
   find "$BIN_DIR" -maxdepth 1 -type f -name 'medley-engine-*' 2>/dev/null \
     | sed 's#.*/medley-engine-##' \
-    | sort -t. -k1,1nr -k2,2nr -k3,3nr \
+    | vsort_desc \
     | tail -n +3 \
     | while IFS= read -r v; do rm -f "$BIN_DIR/medley-engine-$v" 2>/dev/null || true; done
 fi

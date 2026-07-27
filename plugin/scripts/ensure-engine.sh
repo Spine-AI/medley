@@ -29,12 +29,16 @@ BIN_PATH="${BIN_DIR}/medley-engine-${VERSION}"
 # `6-dev` and the fourth is never compared, so two dev builds of one x.y.z tied on EVERY key and fell
 # back to whole-line lexicographic order. That stalled the engine-path pointer (dev.1 never advanced
 # past dev.0), let a stale session stamp it backward, and made prune treat the oldest build as newest.
-# (macOS BSD sort has no -V, hence the hand-built key.)
+# (macOS BSD sort has no -V, hence the hand-built key.) The sort is `-s` (stable) keyed on ONLY the
+# first field (the numeric key) — equal keys must preserve input order, because `version_ge` relies on
+# a cmp-equal pair (e.g. a stable X.Y.Z and its own X.Y.Z-dev.0, both [X,Y,Z,0]) resolving to `$1`, the
+# first line piped in; sorting on the whole line (or a plain `sort -r`) would fall through to a
+# whole-line tiebreak instead, where the shorter/stable string always loses regardless of argument order.
 vsort_desc() {
   awk '{
     v = $0; sub(/-dev\./, ".", v); n = split(v, p, ".")
-    printf "%05d.%05d.%05d.%05d\t%s\n", p[1]+0, p[2]+0, p[3]+0, (n > 3 ? p[4]+0 : 0), $0
-  }' | sort -r | cut -f2
+    printf "%010d.%010d.%010d.%010d\t%s\n", p[1]+0, p[2]+0, p[3]+0, (n > 3 ? p[4]+0 : 0), $0
+  }' | sort -s -r -k1,1 | cut -f2
 }
 
 # Portable "is $1 >= $2" for dotted x.y.z[-dev.N] versions.

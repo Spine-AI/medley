@@ -8,7 +8,7 @@
     },
     "medley_gateway": {
       "type": "http",
-      "url": "http://127.0.0.1:8730/mcp",
+      "url": "http://127.0.0.1:8730/mcp/gateway",
       "headers": {
         "X-Medley-Repo-Raw": "${CLAUDE_PROJECT_DIR}",
         "X-Medley-Worker": "1",

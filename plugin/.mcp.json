@@ -7,14 +7,9 @@
       "headersHelper": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-headers.sh\" \"${CLAUDE_PLUGIN_DATA}\""
     },
     "medley_gateway": {
-      "type": "http",
-      "url": "http://127.0.0.1:8730/mcp/gateway",
-      "headers": {
-        "X-Medley-Repo-Raw": "${CLAUDE_PROJECT_DIR}",
-        "X-Medley-Worker": "1",
-        "X-Medley-Caller": "top-level"
-      },
-      "headersHelper": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-headers.sh\" \"${CLAUDE_PLUGIN_DATA}\""
+      "type": "stdio",
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp-gateway.sh", "${CLAUDE_PLUGIN_DATA}"]
     }
   }
 }

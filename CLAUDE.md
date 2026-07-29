@@ -80,6 +80,19 @@ persistent, writable `${CLAUDE_PLUGIN_DATA}/bin` dir. No auth, no Node, no npm.
 - `scripts/run-engine.sh` — the **stdio fallback** transport (`run-engine.sh mcp` → the engine's
   `mcp` proxy) for Claude Code older than the http/`headersHelper` baseline, and the binary resolver
   `mcp-headers.sh` reuses. Not on the default path.
+- `scripts/mcp-gateway.sh` — launches the `medley_gateway` server (`mcp --gateway`, your connected
+  apps). Resolution is **pin-STRICT**: the binary the plugin is pinned to or nothing, because an older
+  engine silently ignores `--gateway` and serves the ORCHESTRATOR under the gateway's name — duplicate
+  mission tools, far worse than a clean failure. That is the one behavioral difference from
+  `run-engine.sh`, which may fall back to `~/.medley/engine-path`.
+  **One file, two install locations.** From `<plugin>/scripts/` it reads the manifest pin via
+  `$DIR/..` (Claude Code). `session-start.sh` also installs it as `~/.medley/bin/medley-gateway` for
+  hosts that hand an MCP server no plugin env (Codex), where it instead reads the fixed-path
+  breadcrumbs `~/.medley/codex-engine-pin` + `codex-plugin-data`. Those fallbacks sit behind ONE gate
+  that asks *which copy am I* **by location** (`$DIR` vs `~/.medley/bin`) — deliberately not by "did I
+  find a pin", since an unpinned plugin dir must keep REFUSING rather than resolving against the other
+  host's cache. On the Claude path the whole block is dead code; that equivalence is A/B-verified
+  against the pre-Codex file and pinned by `test_mcp_gateway.sh`.
 - `~/.medley/engine-path` — written ONLY by `ensure-engine.sh` (`record_engine_path`, which only ever
   ADVANCES it — so a stale older-pin session, e.g. a concurrent Claude Code window on a prior plugin
   cache, cannot downgrade the cache) so the **statusline** (wired via `settings.json`, where
@@ -152,6 +165,16 @@ data dir (`~/.codex/plugins/data/medley-medley`, mapped onto `CLAUDE_PLUGIN_DATA
 rolls to it. But `~/.medley` is **shared**: one state dir, one daemon, one port — don't run Codex and
 Claude Code against different engine builds at the same time.
 
+Two Codex-only wrinkles in that update path, neither of which affects Claude Code:
+- **The pin's fast path is Claude-only.** `X-Medley-Engine-Pin` is emitted by `mcp-headers.sh`, i.e.
+  CC's `headersHelper`; Codex's transport (`mcp --host codex` → `mcpProxyHeaders`) does not send it. So
+  the daemon's event-driven "converge to the pin" trigger never fires from a Codex session and
+  convergence falls back to the hook-side download plus the daemon's 15-minute sweep.
+- **A daemon roll mid-thread kills Codex's bridge.** The stdio proxy exits when the daemon goes away
+  (`up.onclose = exit`), whereas CC's direct-http entry 404-reinitializes and survives. Whether Codex
+  respawns a dead plugin MCP server is unverified; worst case that thread loses its mission tools until
+  a new one starts.
+
 ## Layout
 
 ```
@@ -160,14 +183,17 @@ Claude Code against different engine builds at the same time.
                                   marketplace add .`)
 scripts/codex-dev-install.sh      Codex dev loop (validate → codex plugin add → restore)
 plugin/.claude-plugin/plugin.json manifest (identity metadata: name, version, author, license, …)
-plugin/.codex-plugin/plugin.json  Codex manifest — inline mcpServers, no `hooks` key (its validator
-                                  rejects one; the runtime finds hooks/hooks.json by path anyway)
+plugin/.codex-plugin/plugin.json  Codex manifest — inline mcpServers (medley + medley_gateway, both
+                                  via ~/.medley/bin launchers), no `hooks` key (its validator rejects
+                                  one; the runtime finds hooks/hooks.json by path anyway)
 plugin/.mcp.json                  http MCP server → daemon /mcp (headersHelper: scripts/mcp-headers.sh)
 plugin/hooks/hooks.json           SessionStart/PreCompact → session-start.sh; PreToolUse gate;
                                   Stop → mission-watch-gate.py (Codex supervision backstop)
 plugin/scripts/                   {resolve,ensure,run}-engine.sh, session-start.sh, statusline.sh,
                                   edit-conflict-gate.py, medley-mcp.sh (installed to the fixed path
                                   ~/.medley/bin/medley-mcp for hosts with no plugin env — Codex),
+                                  mcp-gateway.sh (the pin-strict gateway launcher; ALSO installed to
+                                  ~/.medley/bin/medley-gateway, breadcrumb-resolved — see above),
                                   mission-watch-gate.py (Codex Stop-hook backstop),
                                   strip-codex-config.py (uninstall: ~/.codex/config.toml tables)
 plugin/engine/version             engine version pin (hand-bumped in lockstep with both manifests)

@@ -15,10 +15,46 @@ workflow in the engine repo uploads the compiled binaries to both.
 - **Never commit engine source or the built bundle here.** No `engine/`, no `src/`, no
   `dist/medley-engine.cjs`. Only the plugin (skills, hooks, scripts, manifests) and repo docs.
   (The compiled binaries live on GitHub **Releases**, not in the git tree.)
-- **`plugin/engine/version` is release-managed** — a plain-text version the plugin downloads. The
-  engine repo's release workflow bumps it; don't hand-edit.
+- **`plugin/engine/version` is the engine pin** — a plain-text version the plugin downloads. It is
+  bumped BY HAND, in lockstep with `plugin/.claude-plugin/plugin.json` (and `.codex-plugin/plugin.json`),
+  right after the engine's release CI mirrors that version to R2. The engine repo's CI is R2-only and
+  does **not** bump it. See the engine repo's `RELEASE.md`.
 - **Keep the product/plugin/marketplace name `medley`.** Install is `/plugin install medley`
-  (the plugin name alone is enough — no redundant `@medley` qualifier).
+  (the plugin name alone is enough — no redundant `@medley` qualifier). This is load-bearing, not
+  cosmetic: the engine identifies its own MCP server by the `plugin_medley_medley` key
+  (`engine/services/host-mcp.ts` `isMedleyServer`, `host-mcp-writer.ts` `RESERVED`) and both skills
+  hardcode the `mcp__plugin_medley_medley__` tool prefix, so a rename makes the engine inject the
+  orchestrator into its own workers. The Codex manifest keeps the same `name`; the two manifests must
+  not drift on `name` or `version`.
+- **Two hosts, one plugin.** Claude Code and Codex CLI (0.145+) install the same `plugin/` dir from
+  two manifests — `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` — with the marketplace
+  listed twice, in `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json`. Anything
+  host-specific belongs behind a runtime gate in the scripts (see `session-start.sh`'s `MEDLEY_HOST`),
+  never in a forked copy of a file.
+
+## Codex hook trust — the thing that will waste your afternoon
+
+Measured on Codex CLI 0.145.0, because none of it is documented:
+
+- A hook's `trusted_hash` in `[hooks.state."<plugin>@<market>:hooks/hooks.json:<event>:i:j"]` covers
+  the hook's **command string** — not its matcher, and not the script's contents. So editing a
+  matcher or a script body ships silently; changing a hook **command** invalidates trust.
+- **An untrusted hook is skipped with no error.** Not a warning, not a log line — nothing. If a hook
+  "isn't running", check for its trust entry before you debug the script. (This is why
+  `session-start.sh` prints an explicit warning when a mission is live and the `Stop` entry is
+  missing — see `mission-watch-gate.py`.)
+- `codex exec` fires `SessionStart` and `PreToolUse` but **never `Stop`**, and never starts plugin MCP
+  servers. Trust for an event that never fires is never granted, so `stop:0:0` cannot appear from a
+  headless run. **`exec` is not a valid proxy for the TUI.**
+- A same-version `codex plugin add`, and even a full `plugin remove` + `add`, did **not** materialise
+  trust for a newly added `Stop` entry. Assume new hook events need an interactive TUI session.
+- **Never cachebust the Codex manifest.** Codex names the cache dir after the version the **source**
+  manifest declares and reconciles any disagreement by re-materializing and pruning — so a
+  `+codex.<ts>` install directory is renamed out from under the next session, dangling every absolute
+  path it bound at start. A local marketplace re-copies on a plain `codex plugin add` anyway.
+- **`plugin/engine/version` uses the `X.Y.Z-dev.N` form for prereleases only.** `ensure-engine.sh`'s
+  `vsort_desc` normalizes the literal `-dev.`; `-beta.`/`-rc.` would misorder and strand the
+  engine-path pointer.
 
 ## How the engine is found (the one real mechanism)
 
@@ -76,17 +112,65 @@ reference in a shipped file — always go through the resolver.
 - **Installed mode** (what users get): `/plugin marketplace add <local path or Spine-AI/medley>` →
   `/plugin install medley` → new session downloads the engine binary into `${CLAUDE_PLUGIN_DATA}/bin`.
 - **Validate** before pushing: `claude plugin validate ./plugin --strict`. Shellcheck the
-  `scripts/*.sh`.
+  `scripts/*.sh` (CI's apt shellcheck is stricter than brew's — prefer `if/then` over `A && B || C`),
+  and run the `plugin/scripts/test_*.sh` / `test_*.py` suites.
+
+### Under Codex CLI (0.145+)
+
+Codex has no `--plugin-dir`; it only loads plugins it has **copied** into `~/.codex/plugins/cache`
+from a configured marketplace. So the loop is reinstall → **new thread** (tools bind at thread
+start), wrapped up as:
+
+```
+scripts/codex-dev-install.sh                                           # downloaded engine
+scripts/codex-dev-install.sh ../medley-engine/dist/medley-engine.cjs   # local build
+scripts/codex-dev-install.sh --clear-engine
+```
+
+The local-build pin is `~/.medley/engine-override`, **not** `$MEDLEY_ENGINE`: a Codex plugin MCP
+server inherits no session environment at all (measured — see `plugin/scripts/medley-mcp.sh`), which
+is also why the Codex manifest launches `~/.medley/bin/medley-mcp` rather than anything under the
+plugin dir. `session-start.sh` installs that fixed-path launcher from either host.
+
+**There is no `/mission` on Codex.** Codex plugins cannot contribute slash commands, and skills use
+the `$` prefix namespaced by plugin — so the invocation is **`$medley:mission`** / `$medley:dashboard`,
+or just state the goal (Codex also triggers a skill on description match).
+
+**Editing `plugin/` does nothing until you reinstall** — Codex runs its cache copy, never the source.
+`codex plugin list` shows the *source* version, so it will happily report a version you are not
+running; `ls ~/.codex/plugins/cache/medley/medley/` is the honest check.
+
+**The cache dir name must always equal the source manifest's version.** When they disagree, a session
+bound to the old directory loses every path it captured: `session-start.sh` fails to exec (**hook
+exited with code 127**) and `edit-conflict-gate.py` makes python exit **2** — which is exactly the
+"PreToolUse denied" signal, so a missing file surfaces as a *blocked tool call* with a Python
+traceback as the denial reason. If you see that pair, the cache dir was renamed mid-session.
+
+**The engine updates itself the same way on both hosts.** Codex gives plugin *hooks* a real writable
+data dir (`~/.codex/plugins/data/medley-medley`, mapped onto `CLAUDE_PLUGIN_DATA`) and fires
+`SessionStart`, so `ensure-engine.sh` downloads whatever `plugin/engine/version` pins and the daemon
+rolls to it. But `~/.medley` is **shared**: one state dir, one daemon, one port — don't run Codex and
+Claude Code against different engine builds at the same time.
 
 ## Layout
 
 ```
 .claude-plugin/marketplace.json   the "medley" marketplace (lists this plugin, source ./plugin)
+.agents/plugins/marketplace.json  the same, for Codex (root = repo root; add with `codex plugin
+                                  marketplace add .`)
+scripts/codex-dev-install.sh      Codex dev loop (validate → codex plugin add → restore)
 plugin/.claude-plugin/plugin.json manifest (identity metadata: name, version, author, license, …)
+plugin/.codex-plugin/plugin.json  Codex manifest — inline mcpServers, no `hooks` key (its validator
+                                  rejects one; the runtime finds hooks/hooks.json by path anyway)
 plugin/.mcp.json                  http MCP server → daemon /mcp (headersHelper: scripts/mcp-headers.sh)
-plugin/hooks/hooks.json           SessionStart/PreCompact → session-start.sh; PreToolUse gate
+plugin/hooks/hooks.json           SessionStart/PreCompact → session-start.sh; PreToolUse gate;
+                                  Stop → mission-watch-gate.py (Codex supervision backstop)
 plugin/scripts/                   {resolve,ensure,run}-engine.sh, session-start.sh, statusline.sh,
-                                  edit-conflict-gate.py
-plugin/engine/version             engine version pin (release-managed)
-plugin/skills/mission|dashboard   the /mission and /dashboard skills (+ runtimes/ routing guides)
+                                  edit-conflict-gate.py, medley-mcp.sh (installed to the fixed path
+                                  ~/.medley/bin/medley-mcp for hosts with no plugin env — Codex),
+                                  mission-watch-gate.py (Codex Stop-hook backstop),
+                                  strip-codex-config.py (uninstall: ~/.codex/config.toml tables)
+plugin/engine/version             engine version pin (hand-bumped in lockstep with both manifests)
+plugin/skills/mission|dashboard   the /mission and /dashboard skills (+ hosts/ supervision rationale,
+                                  runtimes/ routing guides)
 ```

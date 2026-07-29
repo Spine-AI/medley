@@ -1,9 +1,9 @@
-# Medley — missions inside Claude Code
+# Medley — missions inside Claude Code and Codex
 
 Medley turns a complex, multi-step goal into a supervised swarm. **`/mission <your goal>`** makes
-your Claude Code session the mission agent: it interviews you, decomposes the goal into a task DAG
+your session the mission agent: it interviews you, decomposes the goal into a task DAG
 with per-task model routing, and supervises parallel in-repo workers (Claude Code, Codex, **and**
-Cursor) that inherit your full setup — skills, MCP servers, `CLAUDE.md`, permission grants, subscription
+Cursor) that inherit your full setup — skills, MCP servers, project memory, permission grants, subscription
 auth. A live localhost **dashboard** streams every worker, surfaces approvals, and lets you steer
 in plain language.
 
@@ -20,15 +20,27 @@ Inside Claude Code:
 /plugin install medley
 ```
 
+Or with Codex CLI (0.145+):
+
+```
+codex plugin marketplace add https://github.com/Spine-AI/medley
+codex plugin add medley@medley
+```
+
 That's it. Your **next session** downloads the engine automatically (a single code-signed binary
 from `engine.getmedley.ai`, with the public GitHub Release as fallback — no token, no npm), then
 everything just works. No `--plugin-dir`, no build toolchain.
+
+**On Codex the skill is `$medley:mission`** (Codex plugins can't add slash commands), and Codex will
+ask you to approve Medley's hooks the first time each one fires — approve them all: the `Stop` hook
+is how a mission keeps supervising itself on that host.
 
 Then: `/mission <your goal>` → answer the interview → review the proposed DAG (each task's routed
 runtime + model) → say "go". Steer with plain language ("tell the UI task to use shadcn", "kill the
 flaky one"). Open the dashboard any time with `/dashboard`.
 
-**Statusline** — a one-line mission ticker (`medley ▸ <title> · RUNNING · 4/9` while a mission runs,
+**Statusline** (Claude Code only — Codex has no user-supplied statusline) — a one-line mission ticker
+(`medley ▸ <title> · RUNNING · 4/9` while a mission runs,
 empty when no mission is active) is set up automatically. On first session
 Medley adds a `statusLine` entry to your `~/.claude/settings.json` pointing at a stable copy it
 refreshes each session (`~/.medley/statusline.sh`), so it survives plugin updates. It never touches a
@@ -53,6 +65,9 @@ Engine updates are shipped by bumping the plugin. Refresh and update:
 /plugin marketplace update medley
 /plugin update medley
 ```
+
+On Codex: `codex plugin marketplace update medley && codex plugin add medley@medley`, then start a
+**new thread** — Codex binds a plugin's tools at thread start and runs its cached copy, not the source.
 
 The next session detects the new pinned engine version and downloads it automatically; the running
 engine daemon rolls itself forward to the new version on next use (only ever forward, never back to an
@@ -85,14 +100,19 @@ and what must never land in this public repo).
 
 ```
 .claude-plugin/marketplace.json   the "medley" marketplace catalog (lists this plugin)
+.agents/plugins/marketplace.json  the same catalog, for Codex
 plugin/
-  .claude-plugin/plugin.json      plugin manifest
+  .claude-plugin/plugin.json      plugin manifest (Claude Code)
+  .codex-plugin/plugin.json       plugin manifest (Codex)
   .mcp.json                       registers the medley MCP server (via scripts/run-engine.sh)
-  hooks/hooks.json                SessionStart reminder + PreToolUse edit-conflict gate
+  hooks/hooks.json                SessionStart reminder + PreToolUse edit-conflict gate +
+                                  Stop mission-supervision backstop (Codex)
   scripts/                        {resolve,ensure,run}-engine.sh, session-start.sh, statusline.sh,
-                                  edit-conflict-gate.py
-  engine/version                  pins the engine version the plugin downloads (release-managed)
-  skills/mission, skills/dashboard the /mission and /dashboard skills (+ per-runtime routing guides)
+                                  edit-conflict-gate.py, medley-mcp.sh, mission-watch-gate.py,
+                                  strip-codex-config.py
+  engine/version                  pins the engine version the plugin downloads
+  skills/mission, skills/dashboard the /mission and /dashboard skills (+ per-host supervision and
+                                  per-runtime routing guides)
 ```
 
 ## Security & privacy

@@ -137,10 +137,31 @@ What this plugin does on your machine, stated plainly:
 - **Workers run with your own auth.** Spawned workers use the `claude` / `codex` / `agent` CLIs
   already installed and logged in on your machine; the plugin never handles your credentials.
 
-Uninstall: `/plugin uninstall medley` unregisters the plugin but leaves the daemon and state
-behind — run `plugin/scripts/uninstall.sh` for a complete removal (LaunchAgent, downloaded
-binaries, `~/.medley/` state; `--dry-run` shows the plan first, `--keep-data` preserves mission
-history).
+### Uninstall
+
+Just removing the plugin is enough — Medley cleans up after itself. Neither host has a
+plugin-uninstall hook, so the running background service notices it has been orphaned (within about a
+minute, and never mid-mission) and tears itself down: its LaunchAgent, its launcher, and every
+downloaded engine binary on every host, ~250 MB in all. Your mission history, provider config and
+any BYOK keys are kept, so reinstalling picks up where you left off — and if you never ran a mission,
+`~/.medley` is removed too and nothing is left behind.
+
+```
+/plugin uninstall medley                    # Claude Code
+codex plugin remove medley@medley           # Codex
+```
+
+To remove **everything immediately**, including your mission history and the `/etc/hosts` +
+statusline + shell-alias edits, run the uninstaller **first** — it lives in the plugin, so the host
+command above deletes it:
+
+```
+~/.claude/plugins/cache/medley/medley/*/scripts/uninstall.sh   # then the host command above
+```
+
+`--dry-run` shows the plan and touches nothing; `--keep-data` keeps the mission DB, `config.toml` and
+your BYOK keys (the background service is removed either way — it is part of the plugin). To see
+exactly what a purge would remove: `medley-engine service purge-plan`.
 
 ## License
 

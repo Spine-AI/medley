@@ -20,9 +20,12 @@ Inside Claude Code:
 /plugin install medley
 ```
 
-Or with Codex CLI (0.145+):
+Or with Codex CLI — **0.142.0 or newer** (older builds cannot parse the plugin manifest and fail with
+`Error: missing or invalid plugin.json`; fix with `brew upgrade codex`, or
+`npm i -g @openai/codex@latest`):
 
-```
+```bash
+codex --version                                                # must be >= 0.142.0
 codex plugin marketplace add https://github.com/Spine-AI/medley
 codex plugin add medley@medley
 ```
@@ -66,8 +69,9 @@ Engine updates are shipped by bumping the plugin. Refresh and update:
 /plugin update medley
 ```
 
-On Codex: `codex plugin marketplace update medley && codex plugin add medley@medley`, then start a
+On Codex: `codex plugin marketplace upgrade medley && codex plugin add medley@medley`, then start a
 **new thread** — Codex binds a plugin's tools at thread start and runs its cached copy, not the source.
+(It is `marketplace upgrade`; Codex has no `marketplace update` subcommand.)
 
 The next session detects the new pinned engine version and downloads it automatically; the running
 engine daemon rolls itself forward to the new version on next use (only ever forward, never back to an

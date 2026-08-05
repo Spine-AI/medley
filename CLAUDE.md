@@ -130,7 +130,18 @@ reference in a shipped file — always go through the resolver.
   reports **info**-level findings while brew's default threshold hides them — so a bare local run went
   green on an `SC2015` (`A && B || C`) that failed CI. Prefer `if/then` over `A && B || C` regardless.
 
-### Under Codex CLI (0.145+)
+### Under Codex CLI (0.142+ required, 0.145+ measured)
+
+**0.142.0 is a hard floor.** `mcpServers` in `plugin/.codex-plugin/plugin.json` is camelCase-only from
+0.142.0; ≤0.141 knows only snake_case `mcp_servers` and rejects the ENTIRE manifest on the unknown
+key, so `codex plugin add` dies with a bare `Error: missing or invalid plugin.json` naming no field
+and no file — while `codex plugin marketplace add` succeeds, which makes it read like a broken repo.
+Bisected 2026-08-06: 0.138.0–0.141.0 fail, 0.142.0 → 0.147.0-alpha.6.5 install. **Never "fix" it by
+renaming the key:** 0.142+ ignores that spelling and falls back to `plugin/.mcp.json`, silently
+swapping the `--host codex` stdio launcher for the Claude wiring (http `:8730`,
+`${CLAUDE_PLUGIN_ROOT}` paths, an unsupported `headersHelper`). Repro host-version questions against a
+throwaway `CODEX_HOME=$(mktemp -d)` — every `codex plugin`/`mcp` subcommand honors it.
+
 
 Codex has no `--plugin-dir`; it only loads plugins it has **copied** into `~/.codex/plugins/cache`
 from a configured marketplace. So the loop is reinstall → **new thread** (tools bind at thread

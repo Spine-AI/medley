@@ -117,6 +117,125 @@ def supervises(repo: str, session_id, missions) -> bool:
     return any(m["id"] in recorded for m in missions)
 
 
+def owed_messages(repo: str):
+    """Composer messages this repo's missions still owe the host session, from
+    `.medley/composer-outbox.json`. [] when absent/stale/unparseable.
+
+    A SEPARATE file from mission-state.json on purpose: that one is deleted the moment no mission
+    governs the repo, and the case this exists for is "the mission finished and the user is still
+    talking to the agent" — so reading it from there would go blind exactly when it matters.
+
+    Same daemon-liveness probe as live_missions: a dead writer's file is stale, not authoritative, so
+    a SIGKILLed daemon can never leave an agent being nagged forever.
+    """
+    try:
+        with open(os.path.join(repo, ".medley", "composer-outbox.json")) as fh:
+            state = json.load(fh)
+    except Exception:
+        return []
+    if not isinstance(state, dict):
+        return []
+    pid = state.get("pid")
+    if isinstance(pid, int) and pid > 0:
+        try:
+            os.kill(pid, 0)
+        except PermissionError:
+            pass  # alive, owned by someone else
+        except Exception:
+            return []  # dead writer → stale file
+    owed = state.get("owed")
+    if not isinstance(owed, list):
+        return []
+    return [
+        o
+        for o in owed
+        if isinstance(o, dict)
+        and isinstance(o.get("missionId"), str)
+        and isinstance(o.get("count"), int)
+        and o["count"] > 0
+    ]
+
+
+def supervises_any(repo: str, session_id, mission_ids) -> bool:
+    """True iff this session's binding claims one of `mission_ids` (or holds the "*" wildcard).
+
+    Mirrors `supervises`, but keyed on ids rather than mission dicts — the outbox breadcrumb carries
+    ids only, and unlike the lockdown list it includes missions that have already finished.
+    """
+    return supervises(repo, session_id, [{"id": mid} for mid in mission_ids])
+
+
+def nudge_claude_code(repo: str, session_id) -> int:
+    """Claude Code only: block the stop iff this session owes the user a reply they typed into the
+    dashboard's mission chat.
+
+    ONE rung, and it must stay one. There used to be a second, self-healing rung here: with nothing
+    owed but the daemon reporting the dashboard in use and no watcher parked, it blocked once to get a
+    watcher re-armed. It worked, and it was still wrong — see `watcher_nudge` in session-catchup.py,
+    which now does that job invisibly. A `Stop` hook has exactly one lever, `decision: block`, and
+    Claude Code renders that reason to the USER as `Stop hook error: <reason>`. So the rung whose whole
+    point was to close a gap *quietly* announced itself, in the agent's own idiom, every time — text
+    reading "do not mention this to the user" displayed to the user, under the word "error". Reported
+    from a real session. Nothing about the check was wrong; the hook it lived in was.
+
+    What stays here is the rung that cannot move: someone is WAITING. It has to act at the end of this
+    turn, not at the start of the next one, so a visible line is the right trade — and the copy below
+    is written to be read by the person who will see it, not only by the agent.
+
+    Returns 0 either way (a Stop hook communicates by what it PRINTS, not by exit code). Silent unless
+    both conditions hold, because blocking a turn the user wanted to end is worse than a
+    late-delivered message:
+
+      * something is owed for a mission in this repo, per the engine's outbox breadcrumb, and
+      * THIS session is confirmed to supervise that mission (same strict binding check the Codex
+        path uses — never hijack a session merely sharing the repo).
+
+    Deliberately NOT gated on the mission being live. That was the bug: the user's own case is
+    continuing the thread after the work is done, and requiring a live mission made the hook go quiet
+    at exactly that moment. Nothing here depends on mission status.
+
+    No breadcrumb (an engine older than this plugin, or nothing owed) means silence — the same
+    fail-quiet direction as the rest of this file.
+    """
+    # NOT IN FRONT OF A HUMAN. The rung below asks the agent to arm a background Bash task, and inside
+    # the engine's own RESUMED turn (the away-delivery rung) that request is unmeetable: the resumed turn
+    # is granted read-only tools, so Claude Code answers "This command requires approval", and a task
+    # started there would die with the headless run regardless. Measured consequence of asking anyway:
+    # the agent, blocked and unable to comply, explained Medley's watcher to the user — the one thing
+    # every delivery payload tells it never to do. Whatever this would have papered over is picked up by
+    # the user's next terminal turn, which is the only context that can actually arm a watcher.
+    if os.environ.get("MEDLEY_RESUME") == "1":
+        return 0
+
+    owed = owed_messages(repo)
+    if owed and supervises_any(repo, session_id, [o["missionId"] for o in owed]):
+        total = sum(o["count"] for o in owed)
+        title = owed[0].get("title") or "the mission"
+        # WRITTEN FOR TWO READERS. Claude Code shows this to the user as `Stop hook error: <reason>`, so
+        # it opens with the fact that explains itself to a person — a message is waiting, unread — and
+        # only then instructs the agent. No "this is plumbing, do not mention it": that line was
+        # incoherent the moment it was displayed, and here there is nothing to hide anyway. The user
+        # typed the message; being told it is on its way is useful, not noise.
+        print(
+            json.dumps(
+                {
+                    "decision": "block",
+                    "reason": (
+                        '%d message%s from the Medley dashboard for mission "%s" %s waiting and unread — '
+                        "the text has not reached this transcript yet. Arm the progress watcher as a "
+                        "BACKGROUND Bash task (run_in_background: true) the same way mission_start told "
+                        "you to; it hands you what they said as soon as it wakes you, and then you can "
+                        "answer them directly. Keep re-arming it afterwards so they can keep talking to "
+                        "you here — that watcher is the only live channel from the dashboard. If one is "
+                        "already armed, say so in one line and end your turn; it will deliver."
+                        % (total, "" if total == 1 else "s", title, "is" if total == 1 else "are")
+                    ),
+                }
+            )
+        )
+    return 0
+
+
 def main() -> int:
     if os.environ.get("MEDLEY_WORKER") == "1":
         return 0  # a worker never supervises
@@ -135,10 +254,22 @@ def main() -> int:
     if payload.get("stop_hook_active") is True:
         return 0
 
-    if not on_codex():
-        return 0  # Claude Code: the background watcher owns supervision there
-
     repo = payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+
+    if not on_codex():
+        # Claude Code: the background watcher owns SUPERVISION here, and this hook must not compete
+        # with it (running both would double-supervise — see the header). The one thing the watcher
+        # cannot cover is a person waiting on an answer: the user typed into the dashboard composer,
+        # and the agent is ending its turn without an armed watcher to hand it over. Nudge it to arm
+        # one; the watcher then drains the outbox, which is cursor-independent precisely so a message
+        # queued while nothing was listening still lands.
+        #
+        # Note what this does NOT do: carry the message. Delivery belongs to the channel that can
+        # atomically claim it, exactly as digest delivery belongs to mission_wait on Codex. A hook
+        # that pasted the text in could not mark it delivered, so the watcher would hand the agent the
+        # same sentence a second time.
+        return nudge_claude_code(repo, payload.get("session_id"))
+
     missions = live_missions(repo)
     if not missions:
         return 0
